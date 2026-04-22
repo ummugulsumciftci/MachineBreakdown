@@ -22,6 +22,32 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split, KFold
 from xgboost import XGBRegressor
 
+import streamlit as st
+import joblib
+import os
+
+@st.cache_resource # Modeli hafızada tutar, her etkileşimde tekrar okumaz
+def model_ve_veriyi_yukle():
+    if os.path.exists("egitilmis_model.pkl"):
+        # Kayıtlı model varsa direkt yükle (Çok hızlıdır)
+        return joblib.load("egitilmis_model.pkl")
+    else:
+        # Eğer dosya yoksa (İlk çalıştırma), burada eğitim fonksiyonunu çağırabilirsin
+        # Şimdilik hata vermesi veya eğitimi başlatması için bir kontrol koyalım
+        return None
+
+# Uygulama açılırken paketi yükle
+paket = model_ve_veriyi_yukle()
+
+if paket:
+    # Paketten bileşenleri geri çıkar
+    model = paket["model"]
+    vectorizer = paket["vectorizer"]
+    kmeans = paket["kmeans"]
+    # ... (Diğer tüm değişkenleri buradan çek)
+    st.sidebar.success("Hazır model başarıyla yüklendi!")
+else:
+    st.sidebar.warning("Model dosyası bulunamadı, eğitim bekleniyor...")
 # =====================================================
 # 1. VERİ YÜKLEME
 # =====================================================
@@ -750,3 +776,25 @@ with sekme_analiz:
 st.divider()
 if st.checkbox("Ham Veri Setini İncele (İlk 50 Kayıt)"):
     st.dataframe(df.head(50), use_container_width=True)
+
+import joblib
+
+# Tüm gerekli bileşenleri bir paket (dictionary) haline getiriyoruz
+model_paket = {
+    "model": model,
+    "vectorizer": vectorizer,
+    "kmeans": kmeans,
+    "grup_mean_map": grup_mean_map,
+    "makine_mean_map": makine_mean_map,
+    "global_mean": _global_mean_enc,
+    "MAKINE_KOLONLARI": MAKINE_KOLONLARI,
+    "GRUP_KOLONLARI": GRUP_KOLONLARI,
+    "terms": terms,
+    "order_c": order_c,
+    "sure_log_mean": sure_log.mean(),
+    "sure_log_std": sure_log.std()
+}
+
+# Paketi dosyaya kaydet
+joblib.dump(model_paket, "egitilmis_model.pkl")
+print("✅ Model ve tüm bileşenler 'egitilmis_model.pkl' olarak kaydedildi!")
