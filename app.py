@@ -1,9 +1,11 @@
 import streamlit as st
 import joblib
-import pandas as pd
 import numpy as np
+import pandas as pd
 import re
+import unicodedata
 import scipy.sparse as sp
+from pathlib import Path
 
 # 1. SAYFA AYARLARI VE MODEL YÜKLEME
 st.set_page_config(page_title="Hakan Sac Metal | DSS", layout="wide")
@@ -14,6 +16,9 @@ def modeli_yukle():
 
 paket = modeli_yukle()
 model = paket["model"]
+support_model = paket.get("support_model")
+risk_model = paket.get("risk_model")
+ensemble_model_weight = paket.get("ensemble_model_weight", 1.0)
 vectorizer = paket["vectorizer"]
 kmeans = paket["kmeans"]
 g_map = paket["grup_mean_map"]
@@ -21,24 +26,297 @@ m_map = paket["makine_mean_map"]
 g_mean = paket["global_mean"]
 MAK_KOL = paket["MAKINE_KOLONLARI"]
 GRP_KOL = paket["GRUP_KOLONLARI"]
+OPERASYON_OZELLIKLERI = paket.get("OPERASYON_OZELLIKLERI", [])
 s_mean = paket["sure_log_mean"]
 s_std = paket["sure_log_std"]
+sure_weight = paket.get("sure_weight", 2.0)
+temizle_min_len = paket.get("temizle_min_len", 3)
+metrics = paket.get("metrics", {})
+cluster_uses_duration = paket.get("cluster_uses_duration", True)
+model_feature_set = paket.get("model_feature_set", "full")
+history_feature_maps = paket.get("history_feature_maps")
+planning_calibration = paket.get("planning_calibration", {})
+long_duration_threshold = paket.get("long_duration_threshold", 90)
+similarity_text_matrix = paket.get("similarity_text_matrix")
+training_records = paket.get("training_records", [])
+data_file = paket.get("data_file", "verileriniz.xlsx")
+analysis_path = Path("model_analiz.png")
+history_machine_clean = {
+    (row["Makine_Tipi"], row["Temiz"]): row
+    for row in paket.get("history_machine_clean", [])
+}
+history_clean = {
+    row["Temiz"]: row
+    for row in paket.get("history_clean", [])
+}
 
 ANLAMSIZ_TOKENLAR = {
     "zli", "lmesi", "ldi", "lmis", "lmak", "masi",
-    "yardim", "arizasi", "ariza",
-    "lar", "ler", "dan", "den", "nin", "nun", "bir", "ile"
+    "yardim", "lar", "ler", "dan", "den", "nin", "nun",
+    "bir", "ile"
 }
 
+TERIMLER = {
+    "kafa temizligi": "kafa_temizligi",
+    "kafa temizliği": "kafa_temizligi",
+    "sensor arizasi": "sensor_arizasi",
+    "sensör arızası": "sensor_arizasi",
+    "sensor hatasi": "sensor_arizasi",
+    "parametre ayari": "parametre_ayari",
+    "parametre ayarı": "parametre_ayari",
+    "eksen ayarı": "eksen_ayari",
+    "eksen ayari": "eksen_ayari",
+    "isin ayari": "isin_ayari",
+    "ışın ayarı": "isin_ayari",
+    "işin ayari": "isin_ayari",
+    "işin ayarı": "isin_ayari",
+    "program duzeltilmesi": "program_duzeltme",
+    "program düzeltildi": "program_duzeltme",
+    "program duzeltildi": "program_duzeltme",
+    "konveyor arizasi": "konveyor_arizasi",
+    "konveyör arızası": "konveyor_arizasi",
+}
+
+OPERASYON_ADLARI = {
+    "feat_degisim": "Parça/değişim",
+    "feat_bekleme": "Bekleme",
+    "feat_servis_bakim": "Servis/bakım",
+    "feat_ayar": "Ayar",
+    "feat_temizlik": "Temizlik",
+    "feat_program": "Program/çizim",
+    "feat_sensor": "Sensör",
+    "feat_mekanik": "Mekanik",
+    "feat_elektrik": "Elektrik",
+    "feat_uretim_bekleme": "Üretim/malzeme",
+    "feat_reset": "Reset",
+    "feat_kalibrasyon": "Kalibrasyon",
+}
+
+
+def turkce_normalize(text: str) -> str:
+    text = unicodedata.normalize("NFKD", str(text).lower())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.translate(str.maketrans("çğıöşüâîû", "cgiosuaiu"))
+
+
 def temizle(text: str) -> str:
-    text = str(text).lower()
-    text = re.sub(r'\d+\s*(dk|dakika|dak|saat|sa|sn|saniye)\.?', '', text)
-    text = re.sub(r'\d+', '', text)
-    tr_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
-    text = text.translate(tr_map)
-    text = re.sub(r'[^\w\s]', ' ', text)
-    tokens = [t for t in text.split() if t not in ANLAMSIZ_TOKENLAR and len(t) >= 4]
+    text = turkce_normalize(text)
+
+    for eski, yeni in TERIMLER.items():
+        text = text.replace(turkce_normalize(eski), yeni)
+
+    text = re.sub(r"\d+\s*(dk|dakika|dak|saat|sa|sn|saniye)\.?", " ", text)
+    text = re.sub(r"\d+", " ", text)
+    text = re.sub(r"[^\w\s_]", " ", text)
+    tokens = [
+        token.replace("ligi", "lik").replace("lugu", "luk")
+        for token in text.split()
+        if token not in ANLAMSIZ_TOKENLAR and len(token) >= temizle_min_len
+    ]
     return " ".join(tokens)
+
+
+def operasyon_ozellikleri(text: str) -> dict:
+    raw = turkce_normalize(text)
+    clean = temizle(text)
+    joined = f"{raw} {clean}"
+
+    return {
+        "feat_degisim": int(any(k in joined for k in ["degisim", "degistirme", "degisti", "degisen", "değiş"])),
+        "feat_bekleme": int(any(k in joined for k in ["bekleme", "bekledi", "bekleniyor"])),
+        "feat_servis_bakim": int(any(k in joined for k in ["servis", "bakim", "bakım"])),
+        "feat_ayar": int(any(k in joined for k in ["ayar", "ofset", "parametre", "kalibrasyon"])),
+        "feat_temizlik": int(any(k in joined for k in ["temiz", "temizlik", "temi"])),
+        "feat_program": int(any(k in joined for k in ["program", "cizim", "çizim"])),
+        "feat_sensor": int(any(k in joined for k in ["sensor", "sensör", "fotosel"])),
+        "feat_mekanik": int(any(k in joined for k in ["rulman", "ayna", "cene", "çene", "konveyor", "konveyör", "kafa", "motor", "kayis", "kayış", "zincir"])),
+        "feat_elektrik": int(any(k in joined for k in ["surucu", "sürücü", "elektrik", "voltaj", "sigorta", "kart"])),
+        "feat_uretim_bekleme": int(any(k in joined for k in ["is kalmadi", "iş kalmadı", "malzeme", "paketleme", "uretim", "üretim"])),
+        "feat_reset": int("reset" in joined),
+        "feat_kalibrasyon": int(any(k in joined for k in ["kalibrasyon", "referans", "home"])),
+    }
+
+
+def gecmis_tahmini_bul(makine: str, temiz_metin: str):
+    makine_eslesme = history_machine_clean.get((makine, temiz_metin))
+    if makine_eslesme:
+        return makine_eslesme, "Aynı makine ve aynı arıza geçmişi"
+
+    metin_eslesme = history_clean.get(temiz_metin)
+    if metin_eslesme and metin_eslesme.get("count", 0) >= 3:
+        return metin_eslesme, "Aynı arıza geçmişi"
+
+    return None, None
+
+
+def gecmis_ozellik_satiri(makine: str, temiz_metin: str):
+    if not history_feature_maps:
+        return None
+
+    global_mean = history_feature_maps["global_mean"]
+    global_median = history_feature_maps["global_median"]
+    combo_key = (makine, temiz_metin)
+
+    return np.array(
+        [
+            history_feature_maps["makine_smooth"].get(makine, global_mean),
+            history_feature_maps["makine_median"].get(makine, global_median),
+            history_feature_maps["makine_count"].get(makine, 0),
+            history_feature_maps["temiz_smooth"].get(temiz_metin, global_mean),
+            history_feature_maps["temiz_median"].get(temiz_metin, global_median),
+            history_feature_maps["temiz_count"].get(temiz_metin, 0),
+            history_feature_maps["combo_smooth"].get(combo_key, global_mean),
+            history_feature_maps["combo_median"].get(combo_key, global_median),
+            history_feature_maps["combo_count"].get(combo_key, 0),
+        ],
+        dtype=float,
+    ).reshape(1, -1)
+
+
+def kritik_etiketler(temiz_metin: str) -> set:
+    etiketler = set()
+    tokens = set(temiz_metin.split())
+
+    if any(kelime in temiz_metin for kelime in ["rulman", "bearing"]):
+        etiketler.add("rulman")
+    if any(kelime in temiz_metin for kelime in ["isindi", "isiniyor", "isinma", "sicak", "sicaklik", "hararet"]):
+        etiketler.add("isinma")
+    if "isin_ayari" in tokens or any(
+        ifade in temiz_metin
+        for ifade in ["isin ayari", "lazer_isin", "lazer isin"]
+    ):
+        etiketler.add("isin_ayari")
+    if any(kelime in temiz_metin for kelime in ["tasima", "tasinma", "malzeme_tasima"]):
+        etiketler.add("tasima")
+    if any(kelime in temiz_metin for kelime in ["konveyor", "konveyor_arizasi"]):
+        etiketler.add("konveyor")
+    if any(kelime in temiz_metin for kelime in ["sensor", "sensor_arizasi"]):
+        etiketler.add("sensor")
+    if any(kelime in temiz_metin for kelime in ["ayna"]):
+        etiketler.add("ayna")
+    if any(kelime in temiz_metin for kelime in ["kafa"]):
+        etiketler.add("kafa")
+    if any(kelime in temiz_metin for kelime in ["program", "program_duzeltme"]):
+        etiketler.add("program")
+
+    return etiketler
+
+
+def kritik_uyumlu_mu(sorgu_etiketleri: set, aday_metin: str) -> bool:
+    if not sorgu_etiketleri:
+        return True
+
+    aday_etiketleri = kritik_etiketler(aday_metin)
+
+    if "rulman" in sorgu_etiketleri and "rulman" not in aday_etiketleri:
+        return False
+    if "isinma" in sorgu_etiketleri and not ({"isinma", "rulman"} & aday_etiketleri):
+        return False
+    if "isinma" in sorgu_etiketleri and {"isin_ayari", "tasima"} & aday_etiketleri:
+        return False
+    if "isin_ayari" in sorgu_etiketleri and "isinma" in aday_etiketleri:
+        return False
+
+    ortak = sorgu_etiketleri & aday_etiketleri
+    return bool(ortak) or not aday_etiketleri
+
+
+def benzer_kayitlari_bul(v_tfidf, makine: str, temiz_metin: str, adet: int = 6):
+    if similarity_text_matrix is None or not training_records:
+        return [], 0.0
+
+    skorlar = (v_tfidf @ similarity_text_matrix.T).toarray()[0]
+    sorgu_etiketleri = kritik_etiketler(temiz_metin)
+    makineler = np.array([row["Makine_Tipi"] for row in training_records])
+    skorlar = skorlar + np.where(makineler == makine, 0.08, 0.0)
+    temizler = [row["Temiz"] for row in training_records]
+
+    for idx, aday_metin in enumerate(temizler):
+        if not kritik_uyumlu_mu(sorgu_etiketleri, aday_metin):
+            skorlar[idx] = -1.0
+
+    sirali = [idx for idx in np.argsort(-skorlar) if skorlar[idx] > 0][:adet]
+
+    kayitlar = []
+    for idx in sirali:
+        row = training_records[int(idx)]
+        kayitlar.append(
+            {
+                "Benzerlik": round(float(skorlar[idx]), 3),
+                "Makine": row["Makine_Tipi"],
+                "Arıza": row["Ariza_Aciklamasi"],
+                "Süre (dk)": float(row["Süre_Dk"]),
+            }
+        )
+
+    return kayitlar, float(skorlar[sirali[0]]) if len(sirali) else 0.0
+
+
+def dinamik_planlama_suresi(tahmin_dk: float, uzun_risk: float, benzer_kayitlar: list):
+    benzer_sureler = [
+        row["Süre (dk)"]
+        for row in benzer_kayitlar
+        if row["Benzerlik"] >= 0.30
+    ]
+
+    if len(benzer_sureler) >= 3:
+        p80 = float(np.percentile(benzer_sureler, 80))
+        p90 = float(np.percentile(benzer_sureler, 90))
+        risk_carpani = 0.35 + (uzun_risk * 0.65)
+        plan_sure = max(tahmin_dk + 10.0, p80 + (p90 - p80) * risk_carpani)
+        return plan_sure, "Benzer geçmiş P80/P90 + risk ayarı"
+
+    if uzun_risk < 0.30:
+        ek = 15.0
+    elif uzun_risk < 0.55:
+        ek = 30.0
+    elif uzun_risk < 0.75:
+        ek = 50.0
+    else:
+        ek = planning_calibration.get("upper_add_90", 80.0)
+
+    return tahmin_dk + ek, "Risk seviyesine göre güvenlik payı"
+
+
+def benzer_gecmis_ozeti(benzer_kayitlar: list):
+    guvenilir_sureler = [
+        row["Süre (dk)"]
+        for row in benzer_kayitlar
+        if row["Benzerlik"] >= 0.30
+    ]
+
+    if not guvenilir_sureler:
+        return None
+
+    return {
+        "count": len(guvenilir_sureler),
+        "median": float(np.median(guvenilir_sureler)),
+        "p80": float(np.percentile(guvenilir_sureler, 80)),
+        "max": float(np.max(guvenilir_sureler)),
+        "min": float(np.min(guvenilir_sureler)),
+    }
+
+
+def guven_seviyesi(gecmis, en_yakin_skor: float, uzun_risk: float):
+    puan = 0
+    if gecmis and gecmis.get("count", 0) >= 8:
+        puan += 2
+    elif gecmis and gecmis.get("count", 0) >= 3:
+        puan += 1
+
+    if en_yakin_skor >= 0.75:
+        puan += 2
+    elif en_yakin_skor >= 0.45:
+        puan += 1
+
+    if 0.35 <= uzun_risk <= 0.65:
+        puan -= 1
+
+    if puan >= 3:
+        return "Yüksek"
+    if puan >= 1:
+        return "Orta"
+    return "Düşük"
 
 # 3. ARAYÜZ TASARIMI
 st.title("🏭 Arıza Bakım Karar Destek Sistemi")
@@ -60,8 +338,11 @@ with col_cikti:
         v_tfidf = vectorizer.transform([t_metin])
         
         # Kümeleme
-        s_ph = (g_mean - s_mean) / s_std
-        X_clust = sp.hstack([v_tfidf, sp.csr_matrix([[s_ph * 2.0]])], format="csr")
+        if cluster_uses_duration:
+            s_ph = (g_mean - s_mean) / s_std
+            X_clust = sp.hstack([v_tfidf, sp.csr_matrix([[s_ph * sure_weight]])], format="csr")
+        else:
+            X_clust = v_tfidf
         g_no = str(kmeans.predict(X_clust)[0])
 
         # Encoding
@@ -73,26 +354,113 @@ with col_cikti:
         gr_row = np.zeros((1, len(GRP_KOL)))
         if f"mak_{secilen_makine}" in MAK_KOL: mk_row[0, MAK_KOL.index(f"mak_{secilen_makine}")] = 1
         if f"grup_{g_no}" in GRP_KOL: gr_row[0, GRP_KOL.index(f"grup_{g_no}")] = 1
+        operasyon_map = operasyon_ozellikleri(ariza_notu)
+        operasyon_row = np.array(
+            [[operasyon_map.get(kolon, 0) for kolon in OPERASYON_OZELLIKLERI]],
+            dtype=float,
+        )
 
-        X_final = sp.hstack([sp.csr_matrix(mk_row), sp.csr_matrix(gr_row), sp.csr_matrix([[ge, me]]), v_tfidf], format="csr")
+        if model_feature_set == "machine_text_char":
+            X_final = sp.hstack([sp.csr_matrix(mk_row), v_tfidf], format="csr")
+        else:
+            X_final = sp.hstack([sp.csr_matrix(mk_row), sp.csr_matrix(gr_row), sp.csr_matrix([[ge, me]]), v_tfidf], format="csr")
         
-        tahmin_dk = np.expm1(model.predict(X_final)[0])
+        ridge_tahmin_dk = float(np.expm1(model.predict(X_final)[0]))
+        model_tahmin_dk = ridge_tahmin_dk
+
+        gecmis_ozellikleri = gecmis_ozellik_satiri(secilen_makine, t_metin)
+        if support_model is not None and gecmis_ozellikleri is not None:
+            X_support = sp.hstack(
+                [X_final, sp.csr_matrix(gecmis_ozellikleri)],
+                format="csr",
+            )
+            destek_tahmin_dk = float(np.expm1(support_model.predict(X_support)[0]))
+            model_tahmin_dk = (
+                ensemble_model_weight * ridge_tahmin_dk
+                + (1.0 - ensemble_model_weight) * destek_tahmin_dk
+            )
+        else:
+            destek_tahmin_dk = None
+
+        if risk_model is not None:
+            uzun_risk = float(risk_model.predict_proba(X_final)[0, 1])
+        else:
+            uzun_risk = 1.0 if model_tahmin_dk > long_duration_threshold else 0.0
+
+        gecmis, gecmis_kaynak = gecmis_tahmini_bul(secilen_makine, t_metin)
+        benzer_kayitlar, en_yakin_skor = benzer_kayitlari_bul(v_tfidf, secilen_makine, t_metin)
+        benzer_ozet = benzer_gecmis_ozeti(benzer_kayitlar)
+        guven = guven_seviyesi(gecmis, en_yakin_skor, uzun_risk)
+        tahmin_dk = model_tahmin_dk
+        planlama_p80 = tahmin_dk + planning_calibration.get("upper_add_80", 0.0)
+        planlama_p90_global = tahmin_dk + planning_calibration.get("upper_add_90", 0.0)
+        planlama_suresi, planlama_kaynagi = dinamik_planlama_suresi(
+            tahmin_dk,
+            uzun_risk,
+            benzer_kayitlar,
+        )
 
         # --- GÖRSEL SONUÇLAR ---
         st.subheader("🎯 Tahmin Sonuçları")
         
-        c1, c2 = st.columns(2)
-        c1.metric("Tahmini Onarım Süresi", f"{tahmin_dk:.1f} Dakika")
-        c2.metric("Atanan Arıza Grubu", f"Grup {g_no}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Beklenen Süre", f"{tahmin_dk:.1f} dk")
+        c2.metric("Planlama Süresi", f"{planlama_suresi:.1f} dk")
+        c3.metric("Uzun Duruş Riski", f"%{uzun_risk * 100:.0f}")
+        c4.metric("Güven", guven)
 
-        if tahmin_dk > 60:
-            st.error(f"🔴 KRİTİK: Yaklaşık {tahmin_dk/60:.1f} saat duruş öngörülüyor. Bakım ekibini acil çağırın.")
+        if uzun_risk >= 0.65 or planlama_suresi > 120:
+            st.error(f"🔴 KRİTİK: Üretim planında {planlama_suresi/60:.1f} saate kadar duruş payı ayırın.")
+        elif uzun_risk >= 0.35 or planlama_suresi > 60:
+            st.warning(f"🟡 DİKKAT: Planlama için {planlama_suresi:.0f} dk güvenli süre kullanın.")
         else:
-            st.success("🟢 NORMAL: Kısa süreli müdahale ile çözülebilir görünüyor.")
+            st.success("🟢 NORMAL: Kısa süreli müdahale olasılığı daha yüksek.")
+
+        if benzer_kayitlar:
+            st.markdown("#### Benzer Geçmiş Özeti")
+            if benzer_ozet:
+                o1, o2, o3, o4 = st.columns(4)
+                o1.metric("Benzer Kayıt", int(benzer_ozet["count"]))
+                o2.metric("Medyan", f"{benzer_ozet['median']:.1f} dk")
+                o3.metric("P80", f"{benzer_ozet['p80']:.1f} dk")
+                o4.metric("Maksimum", f"{benzer_ozet['max']:.1f} dk")
+            else:
+                st.info("Güvenilir benzer geçmiş özeti üretmek için yeterli eşleşme yok.")
+
+            st.markdown("#### Benzer Geçmiş Kayıtlar")
+            st.dataframe(pd.DataFrame(benzer_kayitlar), use_container_width=True, hide_index=True)
 
         # JÜRİ İÇİN TEKNİK DETAY (Expander)
         with st.expander("🔍 Model Nasıl Karar Verdi? (Teknik Detay)"):
             st.write(f"**İşlenen Kelimeler:** `{t_metin}`")
+            st.write(f"**Model Tahmini:** {model_tahmin_dk:.1f} dk")
+            st.write(f"**Ridge Tahmini:** {ridge_tahmin_dk:.1f} dk")
+            if destek_tahmin_dk is not None:
+                st.write(f"**XGBoost Destek Tahmini:** {destek_tahmin_dk:.1f} dk")
+            st.write(f"**Planlama Kaynağı:** {planlama_kaynagi}")
+            st.write(f"**Planlama P80 Üst Süre:** {planlama_p80:.1f} dk")
+            st.write(f"**Global P90 Üst Süre:** {planlama_p90_global:.1f} dk")
+            st.write(f"**Dinamik Planlama Süresi:** {planlama_suresi:.1f} dk")
+            st.write(f"**Uzun Duruş Eşiği:** {long_duration_threshold} dk")
+            st.write(f"**Uzun Duruş Riski:** %{uzun_risk * 100:.1f}")
+            st.write(f"**En Yakın Benzerlik Skoru:** {en_yakin_skor:.3f}")
+            aktif_operasyonlar = [
+                OPERASYON_ADLARI.get(kolon, kolon)
+                for kolon in OPERASYON_OZELLIKLERI
+                if operasyon_map.get(kolon, 0) == 1
+            ]
+            st.write("**Algılanan Operasyon Özellikleri:** " + (", ".join(aktif_operasyonlar) if aktif_operasyonlar else "Yok"))
+            if benzer_ozet:
+                st.write(
+                    f"**Benzer Geçmiş Özeti:** medyan {benzer_ozet['median']:.1f} dk, "
+                    f"P80 {benzer_ozet['p80']:.1f} dk, maksimum {benzer_ozet['max']:.1f} dk"
+                )
+            if gecmis:
+                st.write(f"**Kullanılan Geçmiş:** {gecmis_kaynak}")
+                st.write(
+                    f"**Geçmiş Aralık:** {gecmis['min']:.1f} - {gecmis['max']:.1f} dk "
+                    f"({int(gecmis['count'])} kayıt)"
+                )
             st.write(f"**Grup Etkisi:** {np.expm1(ge):.1f} dk (Ortalama)")
             st.write(f"**Makine Etkisi:** {np.expm1(me):.1f} dk (Ortalama)")
             if not t_metin:
@@ -100,3 +468,33 @@ with col_cikti:
 
     else:
         st.info("Analiz sonuçlarını görmek için lütfen sol taraftaki formu doldurup butona basın.")
+
+st.markdown("---")
+st.subheader("📊 Eğitim ve Model Analizi")
+
+metric_cols = st.columns(7)
+metric_cols[0].metric("Kayıt Sayısı", metrics.get("record_count", "-"))
+metric_cols[1].metric("Küme Sayısı", metrics.get("cluster_count", "-"))
+
+mae = metrics.get("mae")
+original_mae = metrics.get("original_mae")
+baseline_mae = metrics.get("baseline_mae")
+history_mae = metrics.get("history_mae")
+risk_auc = metrics.get("risk_auc")
+metric_cols[2].metric("Test MAE", f"{mae:.2f} dk" if mae is not None else "-")
+metric_cols[3].metric("Orijinal MAE", f"{original_mae:.2f} dk" if original_mae is not None else "-")
+metric_cols[4].metric(
+    "Baseline MAE",
+    f"{baseline_mae:.2f} dk" if baseline_mae is not None else "-",
+)
+metric_cols[5].metric(
+    "Geçmiş MAE",
+    f"{history_mae:.2f} dk" if history_mae is not None else "-",
+)
+metric_cols[6].metric("Risk AUC", f"{risk_auc:.3f}" if risk_auc is not None else "-")
+
+if analysis_path.exists():
+    st.caption(f"Eğitim verisi: {data_file}")
+    st.image(str(analysis_path), caption="Model analiz grafiği", use_container_width=True)
+else:
+    st.warning("Model analiz grafiği bulunamadı. `train.py` çalıştırıldığında yeniden oluşturulur.")
