@@ -282,8 +282,13 @@ def benzer_gecmis_ozeti(benzer_kayitlar: list):
     guvenilir_sureler = [
         row["Süre (dk)"]
         for row in benzer_kayitlar
-        if row["Benzerlik"] >= 0.30
+        if row["Benzerlik"] >= 0.25
     ]
+
+    if len(guvenilir_sureler) < 3 and len(benzer_kayitlar) >= 5:
+        aday_sureler = [row["Süre (dk)"] for row in benzer_kayitlar if row["Benzerlik"] > 0]
+        if aday_sureler and (max(aday_sureler) - min(aday_sureler) <= 40):
+            guvenilir_sureler = aday_sureler
 
     if not guvenilir_sureler:
         return None
@@ -297,16 +302,26 @@ def benzer_gecmis_ozeti(benzer_kayitlar: list):
     }
 
 
-def guven_seviyesi(gecmis, en_yakin_skor: float, uzun_risk: float):
+def guven_seviyesi(gecmis, en_yakin_skor: float, uzun_risk: float, benzer_ozet=None, benzer_kayitlar=None):
     puan = 0
     if gecmis and gecmis.get("count", 0) >= 8:
         puan += 2
     elif gecmis and gecmis.get("count", 0) >= 3:
         puan += 1
 
+    benzer_sayi = benzer_ozet.get("count", 0) if benzer_ozet else 0
+    if benzer_sayi >= 6:
+        puan += 2
+    elif benzer_sayi >= 3:
+        puan += 1
+    elif benzer_kayitlar and len(benzer_kayitlar) >= 5 and en_yakin_skor >= 0.25:
+        puan += 1
+
     if en_yakin_skor >= 0.75:
         puan += 2
     elif en_yakin_skor >= 0.45:
+        puan += 1
+    elif en_yakin_skor >= 0.25 and benzer_sayi >= 5:
         puan += 1
 
     if 0.35 <= uzun_risk <= 0.65:
@@ -390,7 +405,7 @@ with col_cikti:
         gecmis, gecmis_kaynak = gecmis_tahmini_bul(secilen_makine, t_metin)
         benzer_kayitlar, en_yakin_skor = benzer_kayitlari_bul(v_tfidf, secilen_makine, t_metin)
         benzer_ozet = benzer_gecmis_ozeti(benzer_kayitlar)
-        guven = guven_seviyesi(gecmis, en_yakin_skor, uzun_risk)
+        guven = guven_seviyesi(gecmis, en_yakin_skor, uzun_risk, benzer_ozet, benzer_kayitlar)
         tahmin_dk = model_tahmin_dk
         planlama_p80 = tahmin_dk + planning_calibration.get("upper_add_80", 0.0)
         planlama_p90_global = tahmin_dk + planning_calibration.get("upper_add_90", 0.0)
