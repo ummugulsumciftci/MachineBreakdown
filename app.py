@@ -83,7 +83,7 @@ def veri_satiri_olustur(kolonlar, tarih, makine, ariza_aciklamasi, sure_dk):
     if "Normalize_Ariza_Grubu" in satir:
         satir["Normalize_Ariza_Grubu"] = temiz_ariza
     if "Normalize_Notu" in satir:
-        satir["Normalize_Notu"] = "Arayüzden eklenen/düzenlenen kayıt."
+        satir["Normalize_Notu"] = "Added or edited from the user interface."
 
     return satir
 
@@ -115,18 +115,18 @@ TERIMLER = {
 }
 
 OPERASYON_ADLARI = {
-    "feat_degisim": "Parça/değişim",
-    "feat_bekleme": "Bekleme",
-    "feat_servis_bakim": "Servis/bakım",
-    "feat_ayar": "Ayar",
-    "feat_temizlik": "Temizlik",
-    "feat_program": "Program/çizim",
-    "feat_sensor": "Sensör",
-    "feat_mekanik": "Mekanik",
-    "feat_elektrik": "Elektrik",
-    "feat_uretim_bekleme": "Üretim/malzeme",
+    "feat_degisim": "Part replacement",
+    "feat_bekleme": "Waiting",
+    "feat_servis_bakim": "Service/maintenance",
+    "feat_ayar": "Adjustment",
+    "feat_temizlik": "Cleaning",
+    "feat_program": "Program/drawing",
+    "feat_sensor": "Sensor",
+    "feat_mekanik": "Mechanical",
+    "feat_elektrik": "Electrical",
+    "feat_uretim_bekleme": "Production/material",
     "feat_reset": "Reset",
-    "feat_kalibrasyon": "Kalibrasyon",
+    "feat_kalibrasyon": "Calibration",
 }
 
 
@@ -177,11 +177,11 @@ def operasyon_ozellikleri(text: str) -> dict:
 def gecmis_tahmini_bul(makine: str, temiz_metin: str):
     makine_eslesme = history_machine_clean.get((makine, temiz_metin))
     if makine_eslesme:
-        return makine_eslesme, "Aynı makine ve aynı arıza geçmişi"
+        return makine_eslesme, "Same machine and same failure history"
 
     metin_eslesme = history_clean.get(temiz_metin)
     if metin_eslesme and metin_eslesme.get("count", 0) >= 3:
-        return metin_eslesme, "Aynı arıza geçmişi"
+        return metin_eslesme, "Same failure history"
 
     return None, None
 
@@ -279,10 +279,10 @@ def benzer_kayitlari_bul(v_tfidf, makine: str, temiz_metin: str, adet: int = 6):
         row = training_records[int(idx)]
         kayitlar.append(
             {
-                "Benzerlik": round(float(skorlar[idx]), 3),
-                "Makine": row["Makine_Tipi"],
-                "Arıza": row["Ariza_Aciklamasi"],
-                "Süre (dk)": float(row["Süre_Dk"]),
+                "Similarity": round(float(skorlar[idx]), 3),
+                "Machine": row["Makine_Tipi"],
+                "Failure": row["Ariza_Aciklamasi"],
+                "Duration (min)": float(row["Süre_Dk"]),
             }
         )
 
@@ -291,9 +291,9 @@ def benzer_kayitlari_bul(v_tfidf, makine: str, temiz_metin: str, adet: int = 6):
 
 def dinamik_planlama_suresi(tahmin_dk: float, uzun_risk: float, benzer_kayitlar: list):
     benzer_sureler = [
-        row["Süre (dk)"]
+        row["Duration (min)"]
         for row in benzer_kayitlar
-        if row["Benzerlik"] >= 0.30
+        if row["Similarity"] >= 0.30
     ]
 
     if len(benzer_sureler) >= 3:
@@ -301,7 +301,7 @@ def dinamik_planlama_suresi(tahmin_dk: float, uzun_risk: float, benzer_kayitlar:
         p90 = float(np.percentile(benzer_sureler, 90))
         risk_carpani = 0.35 + (uzun_risk * 0.65)
         plan_sure = max(tahmin_dk + 10.0, p80 + (p90 - p80) * risk_carpani)
-        return plan_sure, "Benzer geçmiş P80/P90 + risk ayarı"
+        return plan_sure, "Similar-history P80/P90 with risk adjustment"
 
     if uzun_risk < 0.30:
         ek = 15.0
@@ -312,18 +312,18 @@ def dinamik_planlama_suresi(tahmin_dk: float, uzun_risk: float, benzer_kayitlar:
     else:
         ek = planning_calibration.get("upper_add_90", 80.0)
 
-    return tahmin_dk + ek, "Risk seviyesine göre güvenlik payı"
+    return tahmin_dk + ek, "Risk-based planning buffer"
 
 
 def benzer_gecmis_ozeti(benzer_kayitlar: list):
     guvenilir_sureler = [
-        row["Süre (dk)"]
+        row["Duration (min)"]
         for row in benzer_kayitlar
-        if row["Benzerlik"] >= 0.25
+        if row["Similarity"] >= 0.25
     ]
 
     if len(guvenilir_sureler) < 3 and len(benzer_kayitlar) >= 5:
-        aday_sureler = [row["Süre (dk)"] for row in benzer_kayitlar if row["Benzerlik"] > 0]
+        aday_sureler = [row["Duration (min)"] for row in benzer_kayitlar if row["Similarity"] > 0]
         if aday_sureler and (max(aday_sureler) - min(aday_sureler) <= 40):
             guvenilir_sureler = aday_sureler
 
@@ -365,10 +365,10 @@ def guven_seviyesi(gecmis, en_yakin_skor: float, uzun_risk: float, benzer_ozet=N
         puan -= 1
 
     if puan >= 3:
-        return "Yüksek"
+        return "High"
     if puan >= 1:
-        return "Orta"
-    return "Düşük"
+        return "Medium"
+    return "Low"
 
 
 st.markdown(
@@ -411,6 +411,24 @@ st.markdown(
         border: 1px solid var(--line);
         border-radius: 8px;
         overflow: hidden;
+    }
+    div.stButton > button {
+        border-radius: 8px;
+        border: 1px solid #2f65d8;
+        background: linear-gradient(180deg, #2563eb, #1d4ed8);
+        color: #f8fafc;
+        font-weight: 700;
+    }
+    div.stButton > button:hover {
+        border-color: #60a5fa;
+        background: linear-gradient(180deg, #3b82f6, #2563eb);
+        color: #ffffff;
+    }
+    div[data-testid="stAlert"] {
+        border-radius: 8px;
+        border: 1px solid #1d4ed8;
+        background: rgba(30, 64, 175, 0.22);
+        color: #dbeafe;
     }
     .stTextArea textarea, .stSelectbox div[data-baseweb="select"] > div, .stNumberInput input, .stDateInput input, .stTextInput input {
         background: #1f2430;
@@ -483,8 +501,8 @@ def veri_yonetimi_sayfasi():
             """
             <div class="dss-topbar">
                 <div class="dss-kicker">Dataset operations</div>
-                <div class="dss-title">Veri Yönetimi</div>
-                <div class="dss-subtitle">Yeni kayıt ekleme ve mevcut bakım kaydı düzenleme ekranı.</div>
+                <div class="dss-title">Data Management</div>
+                <div class="dss-subtitle">Create new maintenance records and edit existing downtime logs.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -492,7 +510,7 @@ def veri_yonetimi_sayfasi():
     with ust_sag:
         st.write("")
         st.write("")
-        if st.button("← Tahmin Ekranı", use_container_width=True):
+        if st.button("Back to Prediction", use_container_width=True):
             sayfaya_git("tahmin")
 
     veri_df = veri_dosyasini_yukle()
@@ -502,22 +520,22 @@ def veri_yonetimi_sayfasi():
         veri_makineleri = sorted(veri_df["Makine_Tipi"].dropna().astype(str).unique().tolist())
     makine_secenekleri = sorted(set(makine_secenekleri + veri_makineleri))
 
-    st.caption(f"Veri dosyası: `{data_file}` | Toplam kayıt: {len(veri_df)}")
-    st.info("Bu bölüm Excel verisini günceller. Yeni kayıtların model tahminlerine yansıması için modelin yeniden eğitilmesi gerekir.")
+    st.caption(f"Data file: `{data_file}` | Total records: {len(veri_df)}")
+    st.info("This module updates the Excel dataset. Retrain the model after data changes to reflect new records in predictions.")
 
-    tab_ekle, tab_duzenle = st.tabs(["Yeni Kayıt Ekle", "Kayıt Düzenle"])
+    tab_ekle, tab_duzenle = st.tabs(["Add New Record", "Edit Record"])
 
     with tab_ekle:
         with st.form("yeni_kayit_formu", clear_on_submit=True):
-            yeni_tarih = st.date_input("Tarih")
-            yeni_makine = st.selectbox("Makine Ünitesi", makine_secenekleri, key="yeni_makine")
-            yeni_ariza = st.text_area("Arıza Açıklaması", height=110, key="yeni_ariza")
-            yeni_sure = st.number_input("Süre (dk)", min_value=1, max_value=10000, value=30, step=1, key="yeni_sure")
-            yeni_kaydet = st.form_submit_button("Kaydı Ekle", type="primary")
+            yeni_tarih = st.date_input("Date")
+            yeni_makine = st.selectbox("Machine Unit", makine_secenekleri, key="yeni_makine")
+            yeni_ariza = st.text_area("Failure Description", height=110, key="yeni_ariza")
+            yeni_sure = st.number_input("Duration (min)", min_value=1, max_value=10000, value=30, step=1, key="yeni_sure")
+            yeni_kaydet = st.form_submit_button("Add Record", type="primary")
 
         if yeni_kaydet:
             if not yeni_ariza.strip():
-                st.error("Arıza açıklaması boş olamaz.")
+                st.error("Failure description cannot be empty.")
             else:
                 guncel_df = veri_dosyasini_yukle()
                 if guncel_df.empty:
@@ -535,13 +553,13 @@ def veri_yonetimi_sayfasi():
                     ignore_index=True,
                 )
                 veri_dosyasini_kaydet(guncel_df)
-                st.success(f"Kayıt eklendi. Güncel kayıt sayısı: {len(guncel_df)}")
+                st.success(f"Record added. Current record count: {len(guncel_df)}")
 
     with tab_duzenle:
         if veri_df.empty:
-            st.warning("Düzenlenecek kayıt bulunamadı.")
+            st.warning("No records available for editing.")
         else:
-            arama = st.text_input("Kayıt ara (makine veya arıza açıklaması)", key="kayit_arama")
+            arama = st.text_input("Search records by machine or failure description", key="kayit_arama")
             gorunum = veri_df.copy()
             if arama.strip():
                 arama_metni = arama.strip().lower()
@@ -551,20 +569,29 @@ def veri_yonetimi_sayfasi():
                 gorunum = gorunum[makine_mask | ariza_mask]
 
             gorunum = gorunum.copy()
-            gorunum.insert(0, "Kayıt_No", gorunum.index.astype(int))
+            gorunum.insert(0, "Record_ID", gorunum.index.astype(int))
             gosterilecek_kolonlar = [
                 kolon
-                for kolon in ["Kayıt_No", "Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"]
+                for kolon in ["Record_ID", "Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"]
                 if kolon in gorunum.columns
             ]
+            tablo_gorunum = gorunum.sort_values("Record_ID", ascending=False).head(100)[gosterilecek_kolonlar]
+            tablo_gorunum = tablo_gorunum.rename(
+                columns={
+                    "Tarih": "Date",
+                    "Makine_Tipi": "Machine",
+                    "Ariza_Aciklamasi": "Failure Description",
+                    "Süre_Dk": "Duration (min)",
+                }
+            )
             st.dataframe(
-                gorunum.sort_values("Kayıt_No", ascending=False).head(100)[gosterilecek_kolonlar],
+                tablo_gorunum,
                 use_container_width=True,
                 hide_index=True,
             )
 
             kayit_no = st.number_input(
-                "Düzenlenecek Kayıt No",
+                "Record ID to Edit",
                 min_value=0,
                 max_value=max(0, len(veri_df) - 1),
                 value=max(0, len(veri_df) - 1),
@@ -582,32 +609,32 @@ def veri_yonetimi_sayfasi():
                 sure_degeri = 30
 
             with st.form("kayit_duzenleme_formu"):
-                duzenle_tarih = st.date_input("Tarih", value=tarih_degeri.date(), key="duzenle_tarih")
+                duzenle_tarih = st.date_input("Date", value=tarih_degeri.date(), key="duzenle_tarih")
                 duzenle_makine = st.selectbox(
-                    "Makine Ünitesi",
+                    "Machine Unit",
                     makine_secenekleri,
                     index=makine_secenekleri.index(makine_degeri),
                     key="duzenle_makine",
                 )
                 duzenle_ariza = st.text_area(
-                    "Arıza Açıklaması",
+                    "Failure Description",
                     value=str(secili_satir.get("Ariza_Aciklamasi", "")),
                     height=110,
                     key="duzenle_ariza",
                 )
                 duzenle_sure = st.number_input(
-                    "Süre (dk)",
+                    "Duration (min)",
                     min_value=1,
                     max_value=10000,
                     value=int(round(float(sure_degeri))),
                     step=1,
                     key="duzenle_sure",
                 )
-                guncelle = st.form_submit_button("Kaydı Güncelle", type="primary")
+                guncelle = st.form_submit_button("Update Record", type="primary")
 
             if guncelle:
                 if not duzenle_ariza.strip():
-                    st.error("Arıza açıklaması boş olamaz.")
+                    st.error("Failure description cannot be empty.")
                 else:
                     guncel_df = veri_dosyasini_yukle()
                     hedef_index = int(kayit_no)
@@ -624,10 +651,10 @@ def veri_yonetimi_sayfasi():
                     if "Normalize_Ariza_Grubu" in guncel_df.columns:
                         guncel_df.at[hedef_index, "Normalize_Ariza_Grubu"] = temizle(duzenle_ariza)
                     if "Normalize_Notu" in guncel_df.columns:
-                        guncel_df.at[hedef_index, "Normalize_Notu"] = "Arayüzden düzenlenen kayıt."
+                        guncel_df.at[hedef_index, "Normalize_Notu"] = "Updated from the user interface."
 
                     veri_dosyasini_kaydet(guncel_df)
-                    st.success(f"{hedef_index} numaralı kayıt güncellendi.")
+                    st.success(f"Record {hedef_index} updated.")
 
 
 if aktif_sayfa_al() == "veri":
@@ -641,8 +668,8 @@ with ust_sol:
         f"""
         <div class="dss-topbar">
             <div class="dss-kicker">Maintenance intelligence platform</div>
-            <div class="dss-title">Arıza Bakım Karar Destek Sistemi</div>
-            <div class="dss-subtitle">Ana model: {model_algorithm} | Eğitim verisi: {data_file}</div>
+            <div class="dss-title">Machine Breakdown Decision Support System</div>
+            <div class="dss-subtitle">Primary model: {model_algorithm} | Training data: {data_file}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -650,17 +677,17 @@ with ust_sol:
 with ust_sag:
     st.write("")
     st.write("")
-    if st.button("➕ Veri Yönetimi", use_container_width=True):
+    if st.button("Data Management", use_container_width=True):
         sayfaya_git("veri")
 
 col_girdi, col_cikti = st.columns([1, 1.5], gap="large")
 
 with col_girdi:
-    st.subheader("📋 Arıza Giriş Formu")
-    secilen_makine = st.selectbox("Makine Ünitesi", [m.replace("mak_", "") for m in MAK_KOL])
-    ariza_notu = st.text_area("Arıza Açıklaması (Detaylı yazınız)", height=150, placeholder="Örn: Rulmanlarda aşırı ısınma ve yüksek ses var...")
+    st.subheader("Failure Input")
+    secilen_makine = st.selectbox("Machine Unit", [m.replace("mak_", "") for m in MAK_KOL])
+    ariza_notu = st.text_area("Failure Description", height=150, placeholder="Example: Excessive bearing heat and abnormal noise...")
     
-    hesapla = st.button("ANALİZ ET VE TAHMİN ET", use_container_width=True, type="primary")
+    hesapla = st.button("Analyze and Predict", use_container_width=True, type="primary")
 
 with col_cikti:
     if hesapla and ariza_notu:
@@ -732,209 +759,73 @@ with col_cikti:
         )
 
         # --- GÖRSEL SONUÇLAR ---
-        st.subheader("🎯 Tahmin Sonuçları")
+        st.subheader("Prediction Results")
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Beklenen Süre", f"{tahmin_dk:.1f} dk")
-        c2.metric("Planlama Süresi", f"{planlama_suresi:.1f} dk")
-        c3.metric("Uzun Duruş Riski", f"%{uzun_risk * 100:.0f}")
-        c4.metric("Güven", guven)
+        c1.metric("Expected Duration", f"{tahmin_dk:.1f} min")
+        c2.metric("Planning Duration", f"{planlama_suresi:.1f} min")
+        c3.metric("Long Downtime Risk", f"{uzun_risk * 100:.0f}%")
+        c4.metric("Confidence", guven)
 
         if uzun_risk >= 0.65 or planlama_suresi > 120:
-            st.error(f"🔴 KRİTİK: Üretim planında {planlama_suresi/60:.1f} saate kadar duruş payı ayırın.")
+            st.error(f"Critical: Reserve up to {planlama_suresi/60:.1f} hours of downtime capacity in the production plan.")
         elif uzun_risk >= 0.35 or planlama_suresi > 60:
-            st.warning(f"🟡 DİKKAT: Planlama için {planlama_suresi:.0f} dk güvenli süre kullanın.")
+            st.warning(f"Attention: Use {planlama_suresi:.0f} min as the safe planning duration.")
         else:
-            st.success("🟢 NORMAL: Kısa süreli müdahale olasılığı daha yüksek.")
+            st.success("Normal: A short intervention is more likely.")
 
         if benzer_kayitlar:
-            st.markdown("#### Benzer Geçmiş Özeti")
+            st.markdown("#### Similar Historical Summary")
             if benzer_ozet:
                 o1, o2, o3, o4 = st.columns(4)
-                o1.metric("Benzer Kayıt", int(benzer_ozet["count"]))
-                o2.metric("Medyan", f"{benzer_ozet['median']:.1f} dk")
-                o3.metric("P80", f"{benzer_ozet['p80']:.1f} dk")
-                o4.metric("Maksimum", f"{benzer_ozet['max']:.1f} dk")
+                o1.metric("Similar Records", int(benzer_ozet["count"]))
+                o2.metric("Median", f"{benzer_ozet['median']:.1f} min")
+                o3.metric("P80", f"{benzer_ozet['p80']:.1f} min")
+                o4.metric("Maximum", f"{benzer_ozet['max']:.1f} min")
             else:
-                st.info("Güvenilir benzer geçmiş özeti üretmek için yeterli eşleşme yok.")
+                st.info("Not enough reliable matches to generate a similar-history summary.")
 
-            st.markdown("#### Benzer Geçmiş Kayıtlar")
+            st.markdown("#### Similar Historical Records")
             st.dataframe(pd.DataFrame(benzer_kayitlar), use_container_width=True, hide_index=True)
 
-        # JÜRİ İÇİN TEKNİK DETAY (Expander)
-        with st.expander("🔍 Model Nasıl Karar Verdi? (Teknik Detay)"):
-            st.write(f"**İşlenen Kelimeler:** `{t_metin}`")
-            st.write(f"**Model Tahmini:** {model_tahmin_dk:.1f} dk")
-            st.write(f"**Ana Model:** {model_algorithm}")
-            st.write(f"**Ana Model Tahmini:** {ana_model_tahmin_dk:.1f} dk")
+        # Technical details
+        with st.expander("Model Decision Details"):
+            st.write(f"**Processed Text:** `{t_metin}`")
+            st.write(f"**Model Prediction:** {model_tahmin_dk:.1f} min")
+            st.write(f"**Primary Model:** {model_algorithm}")
+            st.write(f"**Primary Model Prediction:** {ana_model_tahmin_dk:.1f} min")
             if destek_tahmin_dk is not None:
-                st.write(f"**XGBoost Destek Tahmini:** {destek_tahmin_dk:.1f} dk")
-            st.write(f"**Planlama Kaynağı:** {planlama_kaynagi}")
-            st.write(f"**Planlama P80 Üst Süre:** {planlama_p80:.1f} dk")
-            st.write(f"**Global P90 Üst Süre:** {planlama_p90_global:.1f} dk")
-            st.write(f"**Dinamik Planlama Süresi:** {planlama_suresi:.1f} dk")
-            st.write(f"**Uzun Duruş Eşiği:** {long_duration_threshold} dk")
-            st.write(f"**Uzun Duruş Riski:** %{uzun_risk * 100:.1f}")
-            st.write(f"**En Yakın Benzerlik Skoru:** {en_yakin_skor:.3f}")
+                st.write(f"**XGBoost Support Prediction:** {destek_tahmin_dk:.1f} min")
+            st.write(f"**Planning Source:** {planlama_kaynagi}")
+            st.write(f"**Planning P80 Upper Duration:** {planlama_p80:.1f} min")
+            st.write(f"**Global P90 Upper Duration:** {planlama_p90_global:.1f} min")
+            st.write(f"**Dynamic Planning Duration:** {planlama_suresi:.1f} min")
+            st.write(f"**Long Downtime Threshold:** {long_duration_threshold} min")
+            st.write(f"**Long Downtime Risk:** {uzun_risk * 100:.1f}%")
+            st.write(f"**Nearest Similarity Score:** {en_yakin_skor:.3f}")
             aktif_operasyonlar = [
                 OPERASYON_ADLARI.get(kolon, kolon)
                 for kolon in OPERASYON_OZELLIKLERI
                 if operasyon_map.get(kolon, 0) == 1
             ]
-            st.write("**Algılanan Operasyon Özellikleri:** " + (", ".join(aktif_operasyonlar) if aktif_operasyonlar else "Yok"))
+            st.write("**Detected Operational Features:** " + (", ".join(aktif_operasyonlar) if aktif_operasyonlar else "None"))
             if benzer_ozet:
                 st.write(
-                    f"**Benzer Geçmiş Özeti:** medyan {benzer_ozet['median']:.1f} dk, "
-                    f"P80 {benzer_ozet['p80']:.1f} dk, maksimum {benzer_ozet['max']:.1f} dk"
+                    f"**Similar-History Summary:** median {benzer_ozet['median']:.1f} min, "
+                    f"P80 {benzer_ozet['p80']:.1f} min, maximum {benzer_ozet['max']:.1f} min"
                 )
             if gecmis:
-                st.write(f"**Kullanılan Geçmiş:** {gecmis_kaynak}")
+                st.write(f"**Historical Source:** {gecmis_kaynak}")
                 st.write(
-                    f"**Geçmiş Aralık:** {gecmis['min']:.1f} - {gecmis['max']:.1f} dk "
-                    f"({int(gecmis['count'])} kayıt)"
+                    f"**Historical Range:** {gecmis['min']:.1f} - {gecmis['max']:.1f} min "
+                    f"({int(gecmis['count'])} records)"
                 )
-            st.write(f"**Grup Etkisi:** {np.expm1(ge):.1f} dk (Ortalama)")
-            st.write(f"**Makine Etkisi:** {np.expm1(me):.1f} dk (Ortalama)")
+            st.write(f"**Cluster Effect:** {np.expm1(ge):.1f} min (average)")
+            st.write(f"**Machine Effect:** {np.expm1(me):.1f} min (average)")
             if not t_metin:
-                st.warning("⚠️ Uyarı: Açıklama çok kısa olduğu için model metin analizi yapamadı, sadece genel ortalamayı kullanıyor.")
+                st.warning("Warning: The description is too short for text analysis, so the model relies mainly on general averages.")
 
     else:
-        st.info("Analiz sonuçlarını görmek için lütfen sol taraftaki formu doldurup butona basın.")
+        st.info("Complete the input form and run the analysis to display prediction results.")
 
 st.stop()
-
-st.markdown("---")
-with st.expander("🗂️ Veri Yönetimi (Yeni Kayıt / Kayıt Düzenleme)", expanded=False):
-    veri_df = veri_dosyasini_yukle()
-    makine_secenekleri = [m.replace("mak_", "") for m in MAK_KOL]
-    veri_makineleri = []
-    if "Makine_Tipi" in veri_df.columns:
-        veri_makineleri = sorted(veri_df["Makine_Tipi"].dropna().astype(str).unique().tolist())
-    makine_secenekleri = sorted(set(makine_secenekleri + veri_makineleri))
-
-    st.caption(f"Veri dosyası: `{data_file}` | Toplam kayıt: {len(veri_df)}")
-    st.info("Bu bölüm Excel verisini günceller. Yeni kayıtların model tahminlerine yansıması için modelin yeniden eğitilmesi gerekir.")
-
-    tab_ekle, tab_duzenle = st.tabs(["Yeni Kayıt Ekle", "Kayıt Düzenle"])
-
-    with tab_ekle:
-        with st.form("yeni_kayit_formu", clear_on_submit=True):
-            yeni_tarih = st.date_input("Tarih")
-            yeni_makine = st.selectbox("Makine Ünitesi", makine_secenekleri, key="yeni_makine")
-            yeni_ariza = st.text_area("Arıza Açıklaması", height=110, key="yeni_ariza")
-            yeni_sure = st.number_input("Süre (dk)", min_value=1, max_value=10000, value=30, step=1, key="yeni_sure")
-            yeni_kaydet = st.form_submit_button("Kaydı Ekle", type="primary")
-
-        if yeni_kaydet:
-            if not yeni_ariza.strip():
-                st.error("Arıza açıklaması boş olamaz.")
-            else:
-                guncel_df = veri_dosyasini_yukle()
-                if guncel_df.empty:
-                    guncel_df = pd.DataFrame(columns=["Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"])
-
-                yeni_satir = veri_satiri_olustur(
-                    guncel_df.columns,
-                    yeni_tarih,
-                    yeni_makine,
-                    yeni_ariza.strip(),
-                    yeni_sure,
-                )
-                guncel_df = pd.concat(
-                    [guncel_df, pd.DataFrame([yeni_satir], columns=guncel_df.columns)],
-                    ignore_index=True,
-                )
-                veri_dosyasini_kaydet(guncel_df)
-                st.success(f"Kayıt eklendi. Güncel kayıt sayısı: {len(guncel_df)}")
-
-    with tab_duzenle:
-        if veri_df.empty:
-            st.warning("Düzenlenecek kayıt bulunamadı.")
-        else:
-            arama = st.text_input("Kayıt ara (makine veya arıza açıklaması)", key="kayit_arama")
-            gorunum = veri_df.copy()
-            if arama.strip():
-                arama_metni = arama.strip().lower()
-                bos_seri = pd.Series("", index=gorunum.index)
-                makine_mask = gorunum.get("Makine_Tipi", bos_seri).astype(str).str.lower().str.contains(arama_metni, na=False)
-                ariza_mask = gorunum.get("Ariza_Aciklamasi", bos_seri).astype(str).str.lower().str.contains(arama_metni, na=False)
-                gorunum = gorunum[makine_mask | ariza_mask]
-
-            gorunum = gorunum.copy()
-            gorunum.insert(0, "Kayıt_No", gorunum.index.astype(int))
-            gosterilecek_kolonlar = [
-                kolon
-                for kolon in ["Kayıt_No", "Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"]
-                if kolon in gorunum.columns
-            ]
-            st.dataframe(
-                gorunum.sort_values("Kayıt_No", ascending=False).head(100)[gosterilecek_kolonlar],
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            kayit_no = st.number_input(
-                "Düzenlenecek Kayıt No",
-                min_value=0,
-                max_value=max(0, len(veri_df) - 1),
-                value=max(0, len(veri_df) - 1),
-                step=1,
-            )
-            secili_satir = veri_df.iloc[int(kayit_no)]
-            tarih_degeri = pd.to_datetime(secili_satir.get("Tarih", pd.Timestamp.today()), errors="coerce")
-            if pd.isna(tarih_degeri):
-                tarih_degeri = pd.Timestamp.today()
-            makine_degeri = str(secili_satir.get("Makine_Tipi", makine_secenekleri[0] if makine_secenekleri else ""))
-            if makine_degeri not in makine_secenekleri:
-                makine_secenekleri.append(makine_degeri)
-            sure_degeri = pd.to_numeric(secili_satir.get("Süre_Dk", 30), errors="coerce")
-            if pd.isna(sure_degeri) or sure_degeri < 1:
-                sure_degeri = 30
-
-            with st.form("kayit_duzenleme_formu"):
-                duzenle_tarih = st.date_input("Tarih", value=tarih_degeri.date(), key="duzenle_tarih")
-                duzenle_makine = st.selectbox(
-                    "Makine Ünitesi",
-                    makine_secenekleri,
-                    index=makine_secenekleri.index(makine_degeri),
-                    key="duzenle_makine",
-                )
-                duzenle_ariza = st.text_area(
-                    "Arıza Açıklaması",
-                    value=str(secili_satir.get("Ariza_Aciklamasi", "")),
-                    height=110,
-                    key="duzenle_ariza",
-                )
-                duzenle_sure = st.number_input(
-                    "Süre (dk)",
-                    min_value=1,
-                    max_value=10000,
-                    value=int(round(float(sure_degeri))),
-                    step=1,
-                    key="duzenle_sure",
-                )
-                guncelle = st.form_submit_button("Kaydı Güncelle", type="primary")
-
-            if guncelle:
-                if not duzenle_ariza.strip():
-                    st.error("Arıza açıklaması boş olamaz.")
-                else:
-                    guncel_df = veri_dosyasini_yukle()
-                    hedef_index = int(kayit_no)
-                    if "Tarih" in guncel_df.columns:
-                        guncel_df.at[hedef_index, "Tarih"] = pd.Timestamp(duzenle_tarih)
-                    if "Makine_Tipi" in guncel_df.columns:
-                        guncel_df.at[hedef_index, "Makine_Tipi"] = duzenle_makine
-                    if "Ariza_Aciklamasi" in guncel_df.columns:
-                        guncel_df.at[hedef_index, "Ariza_Aciklamasi"] = duzenle_ariza.strip()
-                    if "Süre_Dk" in guncel_df.columns:
-                        guncel_df.at[hedef_index, "Süre_Dk"] = float(duzenle_sure)
-                    if "Sure_Dk_Orijinal" in guncel_df.columns:
-                        guncel_df.at[hedef_index, "Sure_Dk_Orijinal"] = float(duzenle_sure)
-                    if "Normalize_Ariza_Grubu" in guncel_df.columns:
-                        guncel_df.at[hedef_index, "Normalize_Ariza_Grubu"] = temizle(duzenle_ariza)
-                    if "Normalize_Notu" in guncel_df.columns:
-                        guncel_df.at[hedef_index, "Normalize_Notu"] = "Arayüzden düzenlenen kayıt."
-
-                    veri_dosyasini_kaydet(guncel_df)
-                    st.success(f"{hedef_index} numaralı kayıt güncellendi.")
