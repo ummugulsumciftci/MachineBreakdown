@@ -9,12 +9,14 @@ import scipy.sparse as sp
 import matplotlib.pyplot as plt
 
 from sklearn.cluster import KMeans
+from sklearn.decomposition import TruncatedSVD
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import accuracy_score, mean_absolute_error, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.pipeline import FeatureUnion
-from xgboost import XGBRegressor
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import FeatureUnion, make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 
 DATA_FILE = os.environ.get("DATA_FILE", "verileriniz.xlsx")
@@ -396,33 +398,30 @@ def main():
         format="csr",
     )
 
-    model = Ridge(alpha=30.0)
-    support_model = XGBRegressor(
-        n_estimators=500,
-        learning_rate=0.03,
-        max_depth=2,
-        min_child_weight=5,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        objective="reg:squarederror",
-        random_state=RANDOM_STATE,
-        tree_method="hist",
+    n_components = min(120, X_train.shape[0] - 1, X_train.shape[1] - 1)
+    model = make_pipeline(
+        TruncatedSVD(n_components=n_components, random_state=RANDOM_STATE),
+        StandardScaler(),
+        GradientBoostingRegressor(
+            n_estimators=250,
+            learning_rate=0.04,
+            max_depth=2,
+            random_state=RANDOM_STATE,
+        ),
     )
+    support_model = None
     risk_model = LogisticRegression(
         max_iter=2000,
         class_weight="balanced",
         random_state=RANDOM_STATE,
     )
-    ensemble_model_weight = 0.65
+    ensemble_model_weight = 1.0
 
     print("Model eğitiliyor...")
     model.fit(X_train, y_train)
-    support_model.fit(X_train_support, y_train)
     risk_model.fit(X_train, y_long_train)
 
-    ridge_pred = np.expm1(model.predict(X_test))
-    support_pred = np.expm1(support_model.predict(X_test_support))
-    y_pred = ensemble_model_weight * ridge_pred + (1.0 - ensemble_model_weight) * support_pred
+    y_pred = np.expm1(model.predict(X_test))
     long_risk_pred = risk_model.predict_proba(X_test)[:, 1]
     long_risk_class = (long_risk_pred >= 0.5).astype(int)
 
@@ -453,15 +452,7 @@ def main():
     grafik_kaydet(y_clip_test, y_pred, baseline_mae, mae)
 
     final_history_maps = gecmis_ozellik_haritalari(df)
-    X_support_full = sp.hstack(
-        [
-            X,
-            sp.csr_matrix(gecmis_ozellikleri_olustur(df, final_history_maps)),
-        ],
-        format="csr",
-    )
     model.fit(X, y)
-    support_model.fit(X_support_full, y)
     risk_model.fit(X, y_long)
 
     training_records = df[
@@ -473,6 +464,7 @@ def main():
         "model": model,
         "support_model": support_model,
         "risk_model": risk_model,
+        "model_algorithm": "Gradient Boosting",
         "ensemble_model_weight": ensemble_model_weight,
         "history_feature_maps": final_history_maps,
         "planning_calibration": {

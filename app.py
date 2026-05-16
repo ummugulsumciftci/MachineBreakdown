@@ -18,6 +18,7 @@ paket = modeli_yukle()
 model = paket["model"]
 support_model = paket.get("support_model")
 risk_model = paket.get("risk_model")
+model_algorithm = paket.get("model_algorithm", type(model).__name__)
 ensemble_model_weight = paket.get("ensemble_model_weight", 1.0)
 vectorizer = paket["vectorizer"]
 kmeans = paket["kmeans"]
@@ -416,8 +417,8 @@ with col_cikti:
         else:
             X_final = sp.hstack([sp.csr_matrix(mk_row), sp.csr_matrix(gr_row), sp.csr_matrix([[ge, me]]), v_tfidf], format="csr")
         
-        ridge_tahmin_dk = float(np.expm1(model.predict(X_final)[0]))
-        model_tahmin_dk = ridge_tahmin_dk
+        ana_model_tahmin_dk = float(np.expm1(model.predict(X_final)[0]))
+        model_tahmin_dk = ana_model_tahmin_dk
 
         gecmis_ozellikleri = gecmis_ozellik_satiri(secilen_makine, t_metin)
         if support_model is not None and gecmis_ozellikleri is not None:
@@ -427,7 +428,7 @@ with col_cikti:
             )
             destek_tahmin_dk = float(np.expm1(support_model.predict(X_support)[0]))
             model_tahmin_dk = (
-                ensemble_model_weight * ridge_tahmin_dk
+                ensemble_model_weight * ana_model_tahmin_dk
                 + (1.0 - ensemble_model_weight) * destek_tahmin_dk
             )
         else:
@@ -485,7 +486,8 @@ with col_cikti:
         with st.expander("🔍 Model Nasıl Karar Verdi? (Teknik Detay)"):
             st.write(f"**İşlenen Kelimeler:** `{t_metin}`")
             st.write(f"**Model Tahmini:** {model_tahmin_dk:.1f} dk")
-            st.write(f"**Ridge Tahmini:** {ridge_tahmin_dk:.1f} dk")
+            st.write(f"**Ana Model:** {model_algorithm}")
+            st.write(f"**Ana Model Tahmini:** {ana_model_tahmin_dk:.1f} dk")
             if destek_tahmin_dk is not None:
                 st.write(f"**XGBoost Destek Tahmini:** {destek_tahmin_dk:.1f} dk")
             st.write(f"**Planlama Kaynağı:** {planlama_kaynagi}")
