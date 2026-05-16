@@ -370,9 +370,288 @@ def guven_seviyesi(gecmis, en_yakin_skor: float, uzun_risk: float, benzer_ozet=N
         return "Orta"
     return "Düşük"
 
+
+st.markdown(
+    """
+    <style>
+    :root {
+        --panel: #111827;
+        --panel-2: #0f172a;
+        --line: #263244;
+        --accent: #38bdf8;
+        --accent-2: #2563eb;
+    }
+    .block-container {
+        padding-top: 2.1rem;
+        padding-bottom: 2rem;
+        max-width: 1520px;
+    }
+    div[data-testid="stAppViewContainer"] {
+        background:
+            linear-gradient(180deg, rgba(56, 189, 248, 0.06), rgba(15, 23, 42, 0) 280px),
+            #070b12;
+    }
+    h1, h2, h3 {
+        letter-spacing: 0;
+    }
+    section[data-testid="stSidebar"] {
+        background: #090d14;
+        border-right: 1px solid var(--line);
+    }
+    div[data-testid="stMetric"] {
+        background: linear-gradient(180deg, rgba(17, 24, 39, 0.95), rgba(15, 23, 42, 0.95));
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px 16px;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #cbd5e1;
+    }
+    div[data-testid="stDataFrame"] {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .stTextArea textarea, .stSelectbox div[data-baseweb="select"] > div, .stNumberInput input, .stDateInput input, .stTextInput input {
+        background: #1f2430;
+        border: 1px solid #323b4d;
+    }
+    .dss-topbar {
+        border: 1px solid var(--line);
+        background: linear-gradient(135deg, rgba(17, 24, 39, 0.98), rgba(2, 6, 23, 0.98));
+        border-radius: 8px;
+        padding: 18px 20px;
+        margin-bottom: 18px;
+    }
+    .dss-kicker {
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0;
+        margin-bottom: 6px;
+    }
+    .dss-title {
+        color: #f8fafc;
+        font-size: 34px;
+        font-weight: 800;
+        line-height: 1.1;
+        margin: 0;
+    }
+    .dss-subtitle {
+        color: #94a3b8;
+        font-size: 15px;
+        margin-top: 8px;
+    }
+    .dss-card {
+        border: 1px solid var(--line);
+        background: rgba(15, 23, 42, 0.78);
+        border-radius: 8px;
+        padding: 18px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+def aktif_sayfa_al():
+    if "aktif_sayfa" in st.session_state:
+        return st.session_state["aktif_sayfa"]
+    try:
+        sayfa = st.query_params.get("sayfa", "tahmin")
+        if isinstance(sayfa, list):
+            sayfa = sayfa[0]
+        return sayfa
+    except Exception:
+        return "tahmin"
+
+
+def sayfaya_git(sayfa: str):
+    st.session_state["aktif_sayfa"] = sayfa
+    try:
+        st.query_params["sayfa"] = sayfa
+    except Exception:
+        pass
+    st.rerun()
+
+
+def veri_yonetimi_sayfasi():
+    ust_sol, ust_sag = st.columns([4, 1])
+    with ust_sol:
+        st.markdown(
+            """
+            <div class="dss-topbar">
+                <div class="dss-kicker">Dataset operations</div>
+                <div class="dss-title">Veri Yönetimi</div>
+                <div class="dss-subtitle">Yeni kayıt ekleme ve mevcut bakım kaydı düzenleme ekranı.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with ust_sag:
+        st.write("")
+        st.write("")
+        if st.button("← Tahmin Ekranı", use_container_width=True):
+            sayfaya_git("tahmin")
+
+    veri_df = veri_dosyasini_yukle()
+    makine_secenekleri = [m.replace("mak_", "") for m in MAK_KOL]
+    veri_makineleri = []
+    if "Makine_Tipi" in veri_df.columns:
+        veri_makineleri = sorted(veri_df["Makine_Tipi"].dropna().astype(str).unique().tolist())
+    makine_secenekleri = sorted(set(makine_secenekleri + veri_makineleri))
+
+    st.caption(f"Veri dosyası: `{data_file}` | Toplam kayıt: {len(veri_df)}")
+    st.info("Bu bölüm Excel verisini günceller. Yeni kayıtların model tahminlerine yansıması için modelin yeniden eğitilmesi gerekir.")
+
+    tab_ekle, tab_duzenle = st.tabs(["Yeni Kayıt Ekle", "Kayıt Düzenle"])
+
+    with tab_ekle:
+        with st.form("yeni_kayit_formu", clear_on_submit=True):
+            yeni_tarih = st.date_input("Tarih")
+            yeni_makine = st.selectbox("Makine Ünitesi", makine_secenekleri, key="yeni_makine")
+            yeni_ariza = st.text_area("Arıza Açıklaması", height=110, key="yeni_ariza")
+            yeni_sure = st.number_input("Süre (dk)", min_value=1, max_value=10000, value=30, step=1, key="yeni_sure")
+            yeni_kaydet = st.form_submit_button("Kaydı Ekle", type="primary")
+
+        if yeni_kaydet:
+            if not yeni_ariza.strip():
+                st.error("Arıza açıklaması boş olamaz.")
+            else:
+                guncel_df = veri_dosyasini_yukle()
+                if guncel_df.empty:
+                    guncel_df = pd.DataFrame(columns=["Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"])
+
+                yeni_satir = veri_satiri_olustur(
+                    guncel_df.columns,
+                    yeni_tarih,
+                    yeni_makine,
+                    yeni_ariza.strip(),
+                    yeni_sure,
+                )
+                guncel_df = pd.concat(
+                    [guncel_df, pd.DataFrame([yeni_satir], columns=guncel_df.columns)],
+                    ignore_index=True,
+                )
+                veri_dosyasini_kaydet(guncel_df)
+                st.success(f"Kayıt eklendi. Güncel kayıt sayısı: {len(guncel_df)}")
+
+    with tab_duzenle:
+        if veri_df.empty:
+            st.warning("Düzenlenecek kayıt bulunamadı.")
+        else:
+            arama = st.text_input("Kayıt ara (makine veya arıza açıklaması)", key="kayit_arama")
+            gorunum = veri_df.copy()
+            if arama.strip():
+                arama_metni = arama.strip().lower()
+                bos_seri = pd.Series("", index=gorunum.index)
+                makine_mask = gorunum.get("Makine_Tipi", bos_seri).astype(str).str.lower().str.contains(arama_metni, na=False)
+                ariza_mask = gorunum.get("Ariza_Aciklamasi", bos_seri).astype(str).str.lower().str.contains(arama_metni, na=False)
+                gorunum = gorunum[makine_mask | ariza_mask]
+
+            gorunum = gorunum.copy()
+            gorunum.insert(0, "Kayıt_No", gorunum.index.astype(int))
+            gosterilecek_kolonlar = [
+                kolon
+                for kolon in ["Kayıt_No", "Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"]
+                if kolon in gorunum.columns
+            ]
+            st.dataframe(
+                gorunum.sort_values("Kayıt_No", ascending=False).head(100)[gosterilecek_kolonlar],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            kayit_no = st.number_input(
+                "Düzenlenecek Kayıt No",
+                min_value=0,
+                max_value=max(0, len(veri_df) - 1),
+                value=max(0, len(veri_df) - 1),
+                step=1,
+            )
+            secili_satir = veri_df.iloc[int(kayit_no)]
+            tarih_degeri = pd.to_datetime(secili_satir.get("Tarih", pd.Timestamp.today()), errors="coerce")
+            if pd.isna(tarih_degeri):
+                tarih_degeri = pd.Timestamp.today()
+            makine_degeri = str(secili_satir.get("Makine_Tipi", makine_secenekleri[0] if makine_secenekleri else ""))
+            if makine_degeri not in makine_secenekleri:
+                makine_secenekleri.append(makine_degeri)
+            sure_degeri = pd.to_numeric(secili_satir.get("Süre_Dk", 30), errors="coerce")
+            if pd.isna(sure_degeri) or sure_degeri < 1:
+                sure_degeri = 30
+
+            with st.form("kayit_duzenleme_formu"):
+                duzenle_tarih = st.date_input("Tarih", value=tarih_degeri.date(), key="duzenle_tarih")
+                duzenle_makine = st.selectbox(
+                    "Makine Ünitesi",
+                    makine_secenekleri,
+                    index=makine_secenekleri.index(makine_degeri),
+                    key="duzenle_makine",
+                )
+                duzenle_ariza = st.text_area(
+                    "Arıza Açıklaması",
+                    value=str(secili_satir.get("Ariza_Aciklamasi", "")),
+                    height=110,
+                    key="duzenle_ariza",
+                )
+                duzenle_sure = st.number_input(
+                    "Süre (dk)",
+                    min_value=1,
+                    max_value=10000,
+                    value=int(round(float(sure_degeri))),
+                    step=1,
+                    key="duzenle_sure",
+                )
+                guncelle = st.form_submit_button("Kaydı Güncelle", type="primary")
+
+            if guncelle:
+                if not duzenle_ariza.strip():
+                    st.error("Arıza açıklaması boş olamaz.")
+                else:
+                    guncel_df = veri_dosyasini_yukle()
+                    hedef_index = int(kayit_no)
+                    if "Tarih" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Tarih"] = pd.Timestamp(duzenle_tarih)
+                    if "Makine_Tipi" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Makine_Tipi"] = duzenle_makine
+                    if "Ariza_Aciklamasi" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Ariza_Aciklamasi"] = duzenle_ariza.strip()
+                    if "Süre_Dk" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Süre_Dk"] = float(duzenle_sure)
+                    if "Sure_Dk_Orijinal" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Sure_Dk_Orijinal"] = float(duzenle_sure)
+                    if "Normalize_Ariza_Grubu" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Normalize_Ariza_Grubu"] = temizle(duzenle_ariza)
+                    if "Normalize_Notu" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Normalize_Notu"] = "Arayüzden düzenlenen kayıt."
+
+                    veri_dosyasini_kaydet(guncel_df)
+                    st.success(f"{hedef_index} numaralı kayıt güncellendi.")
+
+
+if aktif_sayfa_al() == "veri":
+    veri_yonetimi_sayfasi()
+    st.stop()
+
 # 3. ARAYÜZ TASARIMI
-st.title("🏭 Arıza Bakım Karar Destek Sistemi")
-st.markdown("---")
+ust_sol, ust_sag = st.columns([4, 1])
+with ust_sol:
+    st.markdown(
+        f"""
+        <div class="dss-topbar">
+            <div class="dss-kicker">Maintenance intelligence platform</div>
+            <div class="dss-title">Arıza Bakım Karar Destek Sistemi</div>
+            <div class="dss-subtitle">Ana model: {model_algorithm} | Eğitim verisi: {data_file}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with ust_sag:
+    st.write("")
+    st.write("")
+    if st.button("➕ Veri Yönetimi", use_container_width=True):
+        sayfaya_git("veri")
 
 col_girdi, col_cikti = st.columns([1, 1.5], gap="large")
 
@@ -521,6 +800,8 @@ with col_cikti:
 
     else:
         st.info("Analiz sonuçlarını görmek için lütfen sol taraftaki formu doldurup butona basın.")
+
+st.stop()
 
 st.markdown("---")
 with st.expander("🗂️ Veri Yönetimi (Yeni Kayıt / Kayıt Düzenleme)", expanded=False):
