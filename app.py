@@ -41,6 +41,7 @@ similarity_text_matrix = paket.get("similarity_text_matrix")
 training_records = paket.get("training_records", [])
 data_file = paket.get("data_file", "verileriniz.xlsx")
 analysis_path = Path("model_analiz.png")
+data_path = Path(data_file)
 history_machine_clean = {
     (row["Makine_Tipi"], row["Temiz"]): row
     for row in paket.get("history_machine_clean", [])
@@ -49,6 +50,41 @@ history_clean = {
     row["Temiz"]: row
     for row in paket.get("history_clean", [])
 }
+
+
+def veri_dosyasini_yukle():
+    if not data_path.exists():
+        return pd.DataFrame(columns=["Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"])
+
+    df = pd.read_excel(data_path)
+    df.columns = df.columns.astype(str).str.strip()
+    return df
+
+
+def veri_dosyasini_kaydet(df: pd.DataFrame):
+    df.to_excel(data_path, index=False)
+
+
+def veri_satiri_olustur(kolonlar, tarih, makine, ariza_aciklamasi, sure_dk):
+    temiz_ariza = temizle(ariza_aciklamasi)
+    satir = {kolon: np.nan for kolon in kolonlar}
+
+    if "Tarih" in satir:
+        satir["Tarih"] = pd.Timestamp(tarih)
+    if "Makine_Tipi" in satir:
+        satir["Makine_Tipi"] = makine
+    if "Ariza_Aciklamasi" in satir:
+        satir["Ariza_Aciklamasi"] = ariza_aciklamasi
+    if "Süre_Dk" in satir:
+        satir["Süre_Dk"] = float(sure_dk)
+    if "Sure_Dk_Orijinal" in satir:
+        satir["Sure_Dk_Orijinal"] = float(sure_dk)
+    if "Normalize_Ariza_Grubu" in satir:
+        satir["Normalize_Ariza_Grubu"] = temiz_ariza
+    if "Normalize_Notu" in satir:
+        satir["Normalize_Notu"] = "Arayüzden eklenen/düzenlenen kayıt."
+
+    return satir
 
 ANLAMSIZ_TOKENLAR = {
     "zli", "lmesi", "ldi", "lmis", "lmak", "masi",
@@ -513,3 +549,138 @@ if analysis_path.exists():
     st.image(str(analysis_path), caption="Model analiz grafiği", use_container_width=True)
 else:
     st.warning("Model analiz grafiği bulunamadı. `train.py` çalıştırıldığında yeniden oluşturulur.")
+st.markdown("---")
+with st.expander("🗂️ Veri Yönetimi (Yeni Kayıt / Kayıt Düzenleme)", expanded=False):
+    veri_df = veri_dosyasini_yukle()
+    makine_secenekleri = [m.replace("mak_", "") for m in MAK_KOL]
+    veri_makineleri = []
+    if "Makine_Tipi" in veri_df.columns:
+        veri_makineleri = sorted(veri_df["Makine_Tipi"].dropna().astype(str).unique().tolist())
+    makine_secenekleri = sorted(set(makine_secenekleri + veri_makineleri))
+
+    st.caption(f"Veri dosyası: `{data_file}` | Toplam kayıt: {len(veri_df)}")
+    st.info("Bu bölüm Excel verisini günceller. Yeni kayıtların model tahminlerine yansıması için modelin yeniden eğitilmesi gerekir.")
+
+    tab_ekle, tab_duzenle = st.tabs(["Yeni Kayıt Ekle", "Kayıt Düzenle"])
+
+    with tab_ekle:
+        with st.form("yeni_kayit_formu", clear_on_submit=True):
+            yeni_tarih = st.date_input("Tarih")
+            yeni_makine = st.selectbox("Makine Ünitesi", makine_secenekleri, key="yeni_makine")
+            yeni_ariza = st.text_area("Arıza Açıklaması", height=110, key="yeni_ariza")
+            yeni_sure = st.number_input("Süre (dk)", min_value=1, max_value=10000, value=30, step=1, key="yeni_sure")
+            yeni_kaydet = st.form_submit_button("Kaydı Ekle", type="primary")
+
+        if yeni_kaydet:
+            if not yeni_ariza.strip():
+                st.error("Arıza açıklaması boş olamaz.")
+            else:
+                guncel_df = veri_dosyasini_yukle()
+                if guncel_df.empty:
+                    guncel_df = pd.DataFrame(columns=["Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"])
+
+                yeni_satir = veri_satiri_olustur(
+                    guncel_df.columns,
+                    yeni_tarih,
+                    yeni_makine,
+                    yeni_ariza.strip(),
+                    yeni_sure,
+                )
+                guncel_df = pd.concat(
+                    [guncel_df, pd.DataFrame([yeni_satir], columns=guncel_df.columns)],
+                    ignore_index=True,
+                )
+                veri_dosyasini_kaydet(guncel_df)
+                st.success(f"Kayıt eklendi. Güncel kayıt sayısı: {len(guncel_df)}")
+
+    with tab_duzenle:
+        if veri_df.empty:
+            st.warning("Düzenlenecek kayıt bulunamadı.")
+        else:
+            arama = st.text_input("Kayıt ara (makine veya arıza açıklaması)", key="kayit_arama")
+            gorunum = veri_df.copy()
+            if arama.strip():
+                arama_metni = arama.strip().lower()
+                bos_seri = pd.Series("", index=gorunum.index)
+                makine_mask = gorunum.get("Makine_Tipi", bos_seri).astype(str).str.lower().str.contains(arama_metni, na=False)
+                ariza_mask = gorunum.get("Ariza_Aciklamasi", bos_seri).astype(str).str.lower().str.contains(arama_metni, na=False)
+                gorunum = gorunum[makine_mask | ariza_mask]
+
+            gorunum = gorunum.copy()
+            gorunum.insert(0, "Kayıt_No", gorunum.index.astype(int))
+            gosterilecek_kolonlar = [
+                kolon
+                for kolon in ["Kayıt_No", "Tarih", "Makine_Tipi", "Ariza_Aciklamasi", "Süre_Dk"]
+                if kolon in gorunum.columns
+            ]
+            st.dataframe(
+                gorunum.sort_values("Kayıt_No", ascending=False).head(100)[gosterilecek_kolonlar],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            kayit_no = st.number_input(
+                "Düzenlenecek Kayıt No",
+                min_value=0,
+                max_value=max(0, len(veri_df) - 1),
+                value=max(0, len(veri_df) - 1),
+                step=1,
+            )
+            secili_satir = veri_df.iloc[int(kayit_no)]
+            tarih_degeri = pd.to_datetime(secili_satir.get("Tarih", pd.Timestamp.today()), errors="coerce")
+            if pd.isna(tarih_degeri):
+                tarih_degeri = pd.Timestamp.today()
+            makine_degeri = str(secili_satir.get("Makine_Tipi", makine_secenekleri[0] if makine_secenekleri else ""))
+            if makine_degeri not in makine_secenekleri:
+                makine_secenekleri.append(makine_degeri)
+            sure_degeri = pd.to_numeric(secili_satir.get("Süre_Dk", 30), errors="coerce")
+            if pd.isna(sure_degeri) or sure_degeri < 1:
+                sure_degeri = 30
+
+            with st.form("kayit_duzenleme_formu"):
+                duzenle_tarih = st.date_input("Tarih", value=tarih_degeri.date(), key="duzenle_tarih")
+                duzenle_makine = st.selectbox(
+                    "Makine Ünitesi",
+                    makine_secenekleri,
+                    index=makine_secenekleri.index(makine_degeri),
+                    key="duzenle_makine",
+                )
+                duzenle_ariza = st.text_area(
+                    "Arıza Açıklaması",
+                    value=str(secili_satir.get("Ariza_Aciklamasi", "")),
+                    height=110,
+                    key="duzenle_ariza",
+                )
+                duzenle_sure = st.number_input(
+                    "Süre (dk)",
+                    min_value=1,
+                    max_value=10000,
+                    value=int(round(float(sure_degeri))),
+                    step=1,
+                    key="duzenle_sure",
+                )
+                guncelle = st.form_submit_button("Kaydı Güncelle", type="primary")
+
+            if guncelle:
+                if not duzenle_ariza.strip():
+                    st.error("Arıza açıklaması boş olamaz.")
+                else:
+                    guncel_df = veri_dosyasini_yukle()
+                    hedef_index = int(kayit_no)
+                    if "Tarih" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Tarih"] = pd.Timestamp(duzenle_tarih)
+                    if "Makine_Tipi" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Makine_Tipi"] = duzenle_makine
+                    if "Ariza_Aciklamasi" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Ariza_Aciklamasi"] = duzenle_ariza.strip()
+                    if "Süre_Dk" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Süre_Dk"] = float(duzenle_sure)
+                    if "Sure_Dk_Orijinal" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Sure_Dk_Orijinal"] = float(duzenle_sure)
+                    if "Normalize_Ariza_Grubu" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Normalize_Ariza_Grubu"] = temizle(duzenle_ariza)
+                    if "Normalize_Notu" in guncel_df.columns:
+                        guncel_df.at[hedef_index, "Normalize_Notu"] = "Arayüzden düzenlenen kayıt."
+
+                    veri_dosyasini_kaydet(guncel_df)
+                    st.success(f"{hedef_index} numaralı kayıt güncellendi.")
