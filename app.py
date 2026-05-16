@@ -521,35 +521,6 @@ with col_cikti:
         st.info("Analiz sonuçlarını görmek için lütfen sol taraftaki formu doldurup butona basın.")
 
 st.markdown("---")
-st.subheader("📊 Eğitim ve Model Analizi")
-
-metric_cols = st.columns(7)
-metric_cols[0].metric("Kayıt Sayısı", metrics.get("record_count", "-"))
-metric_cols[1].metric("Küme Sayısı", metrics.get("cluster_count", "-"))
-
-mae = metrics.get("mae")
-original_mae = metrics.get("original_mae")
-baseline_mae = metrics.get("baseline_mae")
-history_mae = metrics.get("history_mae")
-risk_auc = metrics.get("risk_auc")
-metric_cols[2].metric("Test MAE", f"{mae:.2f} dk" if mae is not None else "-")
-metric_cols[3].metric("Orijinal MAE", f"{original_mae:.2f} dk" if original_mae is not None else "-")
-metric_cols[4].metric(
-    "Baseline MAE",
-    f"{baseline_mae:.2f} dk" if baseline_mae is not None else "-",
-)
-metric_cols[5].metric(
-    "Geçmiş MAE",
-    f"{history_mae:.2f} dk" if history_mae is not None else "-",
-)
-metric_cols[6].metric("Risk AUC", f"{risk_auc:.3f}" if risk_auc is not None else "-")
-
-if analysis_path.exists():
-    st.caption(f"Eğitim verisi: {data_file}")
-    st.image(str(analysis_path), caption="Model analiz grafiği", use_container_width=True)
-else:
-    st.warning("Model analiz grafiği bulunamadı. `train.py` çalıştırıldığında yeniden oluşturulur.")
-st.markdown("---")
 with st.expander("🗂️ Veri Yönetimi (Yeni Kayıt / Kayıt Düzenleme)", expanded=False):
     veri_df = veri_dosyasini_yukle()
     makine_secenekleri = [m.replace("mak_", "") for m in MAK_KOL]
