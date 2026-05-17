@@ -530,7 +530,7 @@ def veri_yonetimi_sayfasi():
         veri_makineleri = sorted(veri_df["Makine_Tipi"].dropna().astype(str).unique().tolist())
     makine_secenekleri = sorted(set(makine_secenekleri + veri_makineleri))
 
-    st.caption(f"Data file: `{data_file}` | Total records: {len(veri_df)}")
+    st.caption(f"Total records: {len(veri_df)}")
     st.info("This module updates the Excel dataset. Retrain the model after data changes to reflect new records in predictions.")
 
     tab_ekle, tab_duzenle = st.tabs(["Add New Record", "Edit Record"])
@@ -679,7 +679,6 @@ with ust_sol:
         <div class="dss-topbar">
             <div class="dss-kicker">Maintenance intelligence platform</div>
             <div class="dss-title">Machine Breakdown Decision Support System</div>
-            <div class="dss-subtitle">Primary model: {model_algorithm} | Training data: {data_file}</div>
         </div>
         """,
         unsafe_allow_html=True,
