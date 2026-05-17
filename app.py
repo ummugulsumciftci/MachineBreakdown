@@ -375,11 +375,13 @@ st.markdown(
     """
     <style>
     :root {
-        --panel: #111827;
-        --panel-2: #0f172a;
-        --line: #263244;
-        --accent: #38bdf8;
-        --accent-2: #2563eb;
+        --panel: #ffffff;
+        --panel-2: #f1f7ff;
+        --line: #c8d9ef;
+        --accent: #1d75d8;
+        --accent-2: #0f5fb8;
+        --text-main: #102033;
+        --text-muted: #5d7088;
     }
     .block-container {
         padding-top: 2.1rem;
@@ -388,24 +390,30 @@ st.markdown(
     }
     div[data-testid="stAppViewContainer"] {
         background:
-            linear-gradient(180deg, rgba(56, 189, 248, 0.06), rgba(15, 23, 42, 0) 280px),
-            #070b12;
+            linear-gradient(180deg, rgba(83, 159, 232, 0.22), rgba(255, 255, 255, 0) 320px),
+            #f7fbff;
+        color: var(--text-main);
     }
     h1, h2, h3 {
         letter-spacing: 0;
+        color: var(--text-main);
     }
     section[data-testid="stSidebar"] {
-        background: #090d14;
+        background: #eef6ff;
         border-right: 1px solid var(--line);
     }
     div[data-testid="stMetric"] {
-        background: linear-gradient(180deg, rgba(17, 24, 39, 0.95), rgba(15, 23, 42, 0.95));
+        background: linear-gradient(180deg, #ffffff, #eef6ff);
         border: 1px solid var(--line);
         border-radius: 8px;
         padding: 14px 16px;
+        box-shadow: 0 8px 22px rgba(31, 94, 155, 0.08);
     }
     div[data-testid="stMetricLabel"] {
-        color: #cbd5e1;
+        color: var(--text-muted);
+    }
+    div[data-testid="stMetricValue"] {
+        color: #0f3d73;
     }
     div[data-testid="stDataFrame"] {
         border: 1px solid var(--line);
@@ -414,32 +422,34 @@ st.markdown(
     }
     div.stButton > button {
         border-radius: 8px;
-        border: 1px solid #2f65d8;
-        background: linear-gradient(180deg, #2563eb, #1d4ed8);
-        color: #f8fafc;
+        border: 1px solid #1d75d8;
+        background: linear-gradient(180deg, #2f8cf0, #176bc7);
+        color: #ffffff;
         font-weight: 700;
     }
     div.stButton > button:hover {
-        border-color: #60a5fa;
-        background: linear-gradient(180deg, #3b82f6, #2563eb);
+        border-color: #0f5fb8;
+        background: linear-gradient(180deg, #4ca2ff, #1d75d8);
         color: #ffffff;
     }
     div[data-testid="stAlert"] {
         border-radius: 8px;
-        border: 1px solid #1d4ed8;
-        background: rgba(30, 64, 175, 0.22);
-        color: #dbeafe;
+        border: 1px solid #b7d7f8;
+        background: #eef7ff;
+        color: #143d66;
     }
     .stTextArea textarea, .stSelectbox div[data-baseweb="select"] > div, .stNumberInput input, .stDateInput input, .stTextInput input {
-        background: #1f2430;
-        border: 1px solid #323b4d;
+        background: #ffffff;
+        border: 1px solid #b8cde5;
+        color: var(--text-main);
     }
     .dss-topbar {
         border: 1px solid var(--line);
-        background: linear-gradient(135deg, rgba(17, 24, 39, 0.98), rgba(2, 6, 23, 0.98));
+        background: linear-gradient(135deg, #ffffff, #eaf5ff);
         border-radius: 8px;
         padding: 18px 20px;
         margin-bottom: 18px;
+        box-shadow: 0 10px 28px rgba(31, 94, 155, 0.10);
     }
     .dss-kicker {
         color: var(--accent);
@@ -450,20 +460,20 @@ st.markdown(
         margin-bottom: 6px;
     }
     .dss-title {
-        color: #f8fafc;
+        color: #0f3159;
         font-size: 34px;
         font-weight: 800;
         line-height: 1.1;
         margin: 0;
     }
     .dss-subtitle {
-        color: #94a3b8;
+        color: var(--text-muted);
         font-size: 15px;
         margin-top: 8px;
     }
     .dss-card {
         border: 1px solid var(--line);
-        background: rgba(15, 23, 42, 0.78);
+        background: rgba(255, 255, 255, 0.88);
         border-radius: 8px;
         padding: 18px;
     }
