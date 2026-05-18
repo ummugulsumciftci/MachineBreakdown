@@ -1,8 +1,8 @@
 ﻿Metric,Value
-mae,13.217021303470352
-original_mae,17.078844968639746
-median_absolute_error,9.694024821870542
-original_median_absolute_error,9.694024821870542
+mae,11.636424920287032
+original_mae,13.958688527880804
+median_absolute_error,8.51536699181316
+original_median_absolute_error,9.099524252252795
 risk_accuracy,0.93
 risk_auc,0.9757834757834758
 baseline_mae,24.440147413930227
@@ -10,13 +10,11 @@ history_mae,11.130666666666666
 history_median_absolute_error,10.0
 cluster_count,30.0
 record_count,1500.0
-Ensemble MAE,13.217021303470352
-Ridge MAE,16.839571700271954
-XGBoost MAE,12.110065460205078
-Machine Average MAE,24.640420244133846
+Final Model MAE,11.636424920287032
+Machine Average MAE,24.714477958587224
 Similar History Median MAE,11.015
-Original Duration MAE,17.078844968639746
-Median Absolute Error,9.694024821870542
+Original Duration MAE,13.958688527880804
+Median Absolute Error,8.51536699181316
 Risk Accuracy,0.93
 Risk AUC,0.9757834757834758
 Test Record Count,300.0

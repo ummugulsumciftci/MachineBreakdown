@@ -14,8 +14,10 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 from sklearn.cluster import KMeans
+from sklearn.decomposition import TruncatedSVD
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -24,15 +26,13 @@ from sklearn.metrics import (
     roc_curve,
 )
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import FeatureUnion
-from xgboost import XGBRegressor
+from sklearn.pipeline import FeatureUnion, make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from train import (
     LONG_DURATION_THRESHOLD,
     RANDOM_STATE,
     en_iyi_kume_sayisi_bul,
-    gecmis_ozellik_haritalari,
-    gecmis_ozellikleri_olustur,
     ozellik_ekle,
     veriyi_yukle,
 )
@@ -89,7 +89,7 @@ def load_and_prepare():
     return paket, data_file, df
 
 
-def holdout_predictions(df: pd.DataFrame):
+def holdout_predictions(df: pd.DataFrame, paket: dict):
     vectorizer = FeatureUnion(
         [
             (
@@ -139,33 +139,16 @@ def holdout_predictions(df: pd.DataFrame):
     y_true = df["Süre_Dk_M"].values[test_idx]
     y_true_original = df["Süre_Dk"].values[test_idx]
 
-    eval_history_maps = gecmis_ozellik_haritalari(df.iloc[train_idx])
-    x_train_support = sp.hstack(
-        [
-            x_train,
-            sp.csr_matrix(gecmis_ozellikleri_olustur(df.iloc[train_idx], eval_history_maps)),
-        ],
-        format="csr",
-    )
-    x_test_support = sp.hstack(
-        [
-            x_test,
-            sp.csr_matrix(gecmis_ozellikleri_olustur(df.iloc[test_idx], eval_history_maps)),
-        ],
-        format="csr",
-    )
-
-    ridge = Ridge(alpha=30.0)
-    xgb = XGBRegressor(
-        n_estimators=500,
-        learning_rate=0.03,
-        max_depth=2,
-        min_child_weight=5,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        objective="reg:squarederror",
-        random_state=RANDOM_STATE,
-        tree_method="hist",
+    n_components = min(120, x_train.shape[0] - 1, x_train.shape[1] - 1)
+    model = make_pipeline(
+        TruncatedSVD(n_components=n_components, random_state=RANDOM_STATE),
+        StandardScaler(),
+        GradientBoostingRegressor(
+            n_estimators=250,
+            learning_rate=0.04,
+            max_depth=2,
+            random_state=RANDOM_STATE,
+        ),
     )
     risk_model = LogisticRegression(
         max_iter=2000,
@@ -173,18 +156,16 @@ def holdout_predictions(df: pd.DataFrame):
         random_state=RANDOM_STATE,
     )
 
-    ridge.fit(x_train, y_train)
-    xgb.fit(x_train_support, y_train)
+    model.fit(x_train, y_train)
     risk_model.fit(x_train, y_long_train)
 
-    ridge_pred = np.expm1(ridge.predict(x_test))
-    xgb_pred = np.expm1(xgb.predict(x_test_support))
-    ensemble_weight = 0.65
-    y_pred = ensemble_weight * ridge_pred + (1.0 - ensemble_weight) * xgb_pred
+    y_pred = np.expm1(model.predict(x_test))
     risk_prob = risk_model.predict_proba(x_test)[:, 1]
     risk_class = (risk_prob >= 0.5).astype(int)
 
-    makine_baseline = df.groupby("Makine_Tipi")["Süre_Dk_M"].transform("mean").values[test_idx]
+    machine_mean = df.iloc[train_idx].groupby("Makine_Tipi")["Süre_Dk_M"].mean()
+    global_mean = float(df.iloc[train_idx]["Süre_Dk_M"].mean())
+    makine_baseline = df.iloc[test_idx]["Makine_Tipi"].map(machine_mean).fillna(global_mean).values
     history_lookup = (
         df.iloc[train_idx]
         .groupby(["Makine_Tipi", "Temiz"])["Süre_Dk_M"]
@@ -204,8 +185,7 @@ def holdout_predictions(df: pd.DataFrame):
     pred_df["Gercek_Orijinal_Sure_Dk"] = y_true_original
     pred_df["Tahmin_Dk"] = y_pred
     pred_df["Mutlak_Hata_Dk"] = np.abs(y_true - y_pred)
-    pred_df["Ridge_Tahmin_Dk"] = ridge_pred
-    pred_df["XGBoost_Tahmin_Dk"] = xgb_pred
+    pred_df["Model_Algoritmasi"] = paket.get("model_algorithm", "Gradient Boosting")
     pred_df["Uzun_Durus_Gercek"] = y_long_test
     pred_df["Uzun_Durus_Risk_Skoru"] = risk_prob
     pred_df["Uzun_Durus_Tahmin"] = risk_class
@@ -219,8 +199,7 @@ def holdout_predictions(df: pd.DataFrame):
             "Gercek_Orijinal_Sure_Dk": "Original_Actual_Duration_Min",
             "Tahmin_Dk": "Predicted_Duration_Min",
             "Mutlak_Hata_Dk": "Absolute_Error_Min",
-            "Ridge_Tahmin_Dk": "Ridge_Prediction_Min",
-            "XGBoost_Tahmin_Dk": "XGBoost_Prediction_Min",
+            "Model_Algoritmasi": "Model_Algorithm",
             "Uzun_Durus_Gercek": "Actual_Long_Downtime",
             "Uzun_Durus_Risk_Skoru": "Long_Downtime_Risk_Score",
             "Uzun_Durus_Tahmin": "Predicted_Long_Downtime",
@@ -228,9 +207,7 @@ def holdout_predictions(df: pd.DataFrame):
     )
 
     metrics = {
-        "Ensemble MAE": mean_absolute_error(y_true, y_pred),
-        "Ridge MAE": mean_absolute_error(y_true, ridge_pred),
-        "XGBoost MAE": mean_absolute_error(y_true, xgb_pred),
+        "Final Model MAE": mean_absolute_error(y_true, y_pred),
         "Machine Average MAE": mean_absolute_error(y_true, makine_baseline),
         "Similar History Median MAE": mean_absolute_error(y_true, history_pred),
         "Original Duration MAE": mean_absolute_error(y_true_original, y_pred),
@@ -241,13 +218,13 @@ def holdout_predictions(df: pd.DataFrame):
         "Cluster Count": best_k,
     }
 
-    return pred_df, metrics, y_true, y_pred, ridge_pred, xgb_pred, y_long_test, risk_prob, risk_class
+    return pred_df, metrics, y_true, y_pred, y_long_test, risk_prob, risk_class
 
 
 def grafikler_uret():
     reset_output_dir()
     paket, data_file, df = load_and_prepare()
-    pred_df, metrics, y_true, y_pred, ridge_pred, xgb_pred, y_long_test, risk_prob, risk_class = holdout_predictions(df)
+    pred_df, metrics, y_true, y_pred, y_long_test, risk_prob, risk_class = holdout_predictions(df, paket)
 
     pred_df.to_csv(OUT_DIR / "test_predictions.csv", index=False, encoding="utf-8-sig")
     pd.DataFrame(
@@ -270,7 +247,7 @@ def grafikler_uret():
     axes[0].set_ylabel("Predicted duration (min)")
     axes[0].grid(alpha=0.25)
     axes[1].hist(np.abs(y_true - y_pred), bins=22, color=BLUE, edgecolor="white")
-    axes[1].axvline(metrics["Ensemble MAE"], color=BLUE_DARK, linestyle="--", label=f"MAE: {metrics['Ensemble MAE']:.1f} min")
+    axes[1].axvline(metrics["Final Model MAE"], color=BLUE_DARK, linestyle="--", label=f"MAE: {metrics['Final Model MAE']:.1f} min")
     axes[1].set_title("Absolute Error Distribution")
     axes[1].set_xlabel("Absolute error (min)")
     axes[1].set_ylabel("Record count")
@@ -291,7 +268,7 @@ def grafikler_uret():
 
     plt.figure(figsize=(8, 5))
     plt.hist(np.abs(y_true - y_pred), bins=22, color=BLUE, edgecolor="white")
-    plt.axvline(metrics["Ensemble MAE"], color=BLUE_DARK, linestyle="--", label=f"MAE: {metrics['Ensemble MAE']:.1f} min")
+    plt.axvline(metrics["Final Model MAE"], color=BLUE_DARK, linestyle="--", label=f"MAE: {metrics['Final Model MAE']:.1f} min")
     plt.title("Absolute Error Distribution")
     plt.xlabel("Absolute error (min)")
     plt.ylabel("Record count")
@@ -303,9 +280,7 @@ def grafikler_uret():
         {
             "Machine\naverage": metrics["Machine Average MAE"],
             "Similar history\nmedian": metrics["Similar History Median MAE"],
-            "Ridge": metrics["Ridge MAE"],
-            "XGBoost": metrics["XGBoost MAE"],
-            "Final model": metrics["Ensemble MAE"],
+            "Gradient\nBoosting": metrics["Final Model MAE"],
         }
     )
     plt.figure(figsize=(9, 5))
@@ -375,7 +350,8 @@ def grafikler_uret():
 Training data: {data_file}
 Record count: {len(df)}
 Test record count: {int(metrics['Test Record Count'])}
-Final model MAE: {metrics['Ensemble MAE']:.2f} min
+Final model: {paket.get('model_algorithm', 'Gradient Boosting')}
+Final model MAE: {metrics['Final Model MAE']:.2f} min
 Median Absolute Error: {metrics['Median Absolute Error']:.2f} min
 Risk model AUC: {metrics['Risk AUC']:.3f}
 Risk model accuracy: {metrics['Risk Accuracy'] * 100:.1f}%

@@ -25,13 +25,7 @@ from sklearn.pipeline import FeatureUnion, make_pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 
-from train import (
-    RANDOM_STATE,
-    gecmis_ozellik_haritalari,
-    gecmis_ozellikleri_olustur,
-    ozellik_ekle,
-    veriyi_yukle,
-)
+from train import RANDOM_STATE, ozellik_ekle, veriyi_yukle
 
 
 OUT_DIR = Path("grafikler")
@@ -127,22 +121,6 @@ def main():
     y_train_log = y_log[train_idx]
     y_test = y_true[test_idx]
 
-    history_maps = gecmis_ozellik_haritalari(df.iloc[train_idx])
-    x_train_support = sp.hstack(
-        [
-            x_train,
-            sp.csr_matrix(gecmis_ozellikleri_olustur(df.iloc[train_idx], history_maps)),
-        ],
-        format="csr",
-    )
-    x_test_support = sp.hstack(
-        [
-            x_test,
-            sp.csr_matrix(gecmis_ozellikleri_olustur(df.iloc[test_idx], history_maps)),
-        ],
-        format="csr",
-    )
-
     dense_components = min(120, x_train.shape[0] - 1, x_train.shape[1] - 1)
     models = {
         "Ridge": Ridge(alpha=30.0),
@@ -181,12 +159,8 @@ def main():
 
     results = []
     for name, model in models.items():
-        if name == "XGBoost":
-            model.fit(x_train_support, y_train_log)
-            pred = np.expm1(model.predict(x_test_support))
-        else:
-            model.fit(x_train, y_train_log)
-            pred = np.expm1(model.predict(x_test))
+        model.fit(x_train, y_train_log)
+        pred = np.expm1(model.predict(x_test))
         results.append(summarize(name, y_test, pred))
 
     comparison = pd.DataFrame(results).sort_values("MAE_min", ascending=True).reset_index(drop=True)

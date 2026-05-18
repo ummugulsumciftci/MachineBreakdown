@@ -33,8 +33,6 @@ from xgboost import XGBRegressor
 
 from train import (
     RANDOM_STATE,
-    gecmis_ozellik_haritalari,
-    gecmis_ozellikleri_olustur,
     ozellik_ekle,
     veriyi_yukle,
 )
@@ -148,22 +146,6 @@ def main():
     y_train_log = y_log[train_idx]
     y_test = y_true_clipped[test_idx]
 
-    history_maps = gecmis_ozellik_haritalari(df.iloc[train_idx])
-    x_train_support = sp.hstack(
-        [
-            x_train,
-            sp.csr_matrix(gecmis_ozellikleri_olustur(df.iloc[train_idx], history_maps)),
-        ],
-        format="csr",
-    )
-    x_test_support = sp.hstack(
-        [
-            x_test,
-            sp.csr_matrix(gecmis_ozellikleri_olustur(df.iloc[test_idx], history_maps)),
-        ],
-        format="csr",
-    )
-
     results = []
     predictions = pd.DataFrame(
         {
@@ -209,25 +191,11 @@ def main():
         ),
     }
 
-    ridge_pred = None
-    xgb_pred = None
     for name, model in sparse_models.items():
-        if name == "XGBoost":
-            model.fit(x_train_support, y_train_log)
-            pred = np.expm1(model.predict(x_test_support))
-            xgb_pred = pred
-        else:
-            model.fit(x_train, y_train_log)
-            pred = np.expm1(model.predict(x_test))
-            if name == "Ridge Regression":
-                ridge_pred = pred
+        model.fit(x_train, y_train_log)
+        pred = np.expm1(model.predict(x_test))
         results.append(summarize(name, y_test, pred))
         predictions[name.replace(" ", "_")] = pred
-
-    if ridge_pred is not None and xgb_pred is not None:
-        ensemble_pred = 0.65 * ridge_pred + 0.35 * xgb_pred
-        results.append(summarize("Final Ensemble (Ridge + XGBoost)", y_test, ensemble_pred))
-        predictions["Final_Ensemble"] = ensemble_pred
 
     n_components = min(120, x_train.shape[0] - 1, x_train.shape[1] - 1)
     dense_models = {
